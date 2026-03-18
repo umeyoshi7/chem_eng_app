@@ -1,3 +1,6 @@
+WATER = {"name": "Water", "thermo_id": "water", "mw": 18.015,
+         "density_a": 1.0, "density_b": 0.0}
+
 MISCIBLE_SOLVENTS = [
     {"name": "Ethanol",         "thermo_id": "ethanol",            "mw": 46.068,  "density_a": 0.8064, "density_b": -0.000849},
     {"name": "Methanol",        "thermo_id": "methanol",           "mw": 32.042,  "density_a": 0.8097, "density_b": -0.000960},
@@ -66,6 +69,9 @@ IMMISCIBLE_SOLVENTS = [
     {"name": "4-Methyltetrahydropyran",          "thermo_id": "4-methyltetrahydropyran",    "mw": 100.158, "density_a": 0.8711, "density_b": -0.000900,
      "thermo_surrogate": "tetrahydropyran", "unifac_groups": {1: 1, 27: 1, 78: 2, 79: 1}},
 ]
+
+
+ALL_SOLVENTS = [WATER] + MISCIBLE_SOLVENTS + IMMISCIBLE_SOLVENTS
 
 
 def get_solvent_by_name(name: str, pool: list) -> dict:

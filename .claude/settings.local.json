@@ -1,7 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(find:*)",
+      "Bash(python -c \":*)",
+      "Bash(streamlit run:*)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''app.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''app.py OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''engine.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''engine.py OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''solvents.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''solvents.py OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''engine.py'',encoding=''utf-8''\\).read\\(\\)\\); print\\(''OK''\\)\")"
     ]
   }
 }

@@ -1,9 +1,13 @@
 import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
+from plotly.subplots import make_subplots
 
-from engine import calc_lle_diagram, calc_layer_composition
-from solvents import MISCIBLE_SOLVENTS, IMMISCIBLE_SOLVENTS, get_solvent_by_name
+from engine import (calc_lle_diagram, calc_layer_composition,
+                    calc_vapor_pressure_curve, calc_vle_xy,
+                    calc_rayleigh_distillation, density_water, density_solvent)
+from solvents import (MISCIBLE_SOLVENTS, IMMISCIBLE_SOLVENTS,
+                      ALL_SOLVENTS, get_solvent_by_name)
 
 st.set_page_config(page_title="Ternary LLE Calculator", layout="wide")
 st.title("3成分系 液液平衡（LLE）計算・可視化")
@@ -42,7 +46,9 @@ if st.session_state.get("solvent_key") != solvent_key:
     st.session_state["solvent_key"] = solvent_key
 
 # ── タブ構造 ──────────────────────────────────────────────────
-tab_main, tab_logic = st.tabs(["LLE ダイアグラム", "計算ロジック"])
+tab_lle, tab_vp, tab_vle, tab_conc, tab_logic = st.tabs([
+    "LLE線図", "蒸気圧曲線", "VLE線図", "濃縮シミュレーション", "ロジック"
+])
 
 # ── LLE ダイアグラム計算 ──────────────────────────────────────
 if run or "tie_lines" not in st.session_state:
@@ -92,7 +98,7 @@ with st.sidebar:
                         "相": phase_name, "成分": comp,
                         "mol%": f"{d['mol_pct'][i]:.2f}",
                         "w/w%": f"{d['ww_pct'][i]:.2f}",
-                        "v/w%": f"{d['vw_pct'][i]:.2f}",
+                        "v/v%": f"{d['vv_pct'][i]:.2f}",
                     })
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
             bw = layer_result["beta_water"]
@@ -101,7 +107,7 @@ with st.sidebar:
         else:
             st.info("2相分離なし（均一相）")
 
-with tab_main:
+with tab_lle:
     st.caption(f"Water – {solvent1['name']} – {solvent2['name']} | UNIFAC Dortmund モデル")
 
     # ── 直角三角形 三角図 ─────────────────────────────────────────
@@ -166,27 +172,32 @@ with tab_main:
     fig.update_layout(
         xaxis=dict(
             title=f"{solvent2['name']} (mol fr.)",
-            range=[-0.05, 1.05],
+            range=[0, 1],
+            fixedrange=True,
             scaleanchor='y', scaleratio=1,
+            constrain='domain',
             dtick=0.1, showgrid=False,
         ),
         yaxis=dict(
             title=f"{solvent1['name']} (mol fr.)",
-            range=[-0.05, 1.05],
+            range=[0, 1],
+            fixedrange=True,
+            constrain='domain',
             dtick=0.1, showgrid=False,
         ),
         title=f"Water–{solvent1['name']}–{solvent2['name']} LLE  @ {T_C}°C, 101.325 kPa",
         height=600,
         plot_bgcolor='white',
         legend=dict(x=0.75, y=0.95),
+        dragmode='zoom',
         annotations=[
-            dict(x=0,     y=-0.05, text='Water',              showarrow=False, font=dict(size=13)),
-            dict(x=1,     y=-0.05, text=solvent2["name"],     showarrow=False, font=dict(size=13)),
-            dict(x=-0.05, y=1,     text=solvent1["name"],     showarrow=False, font=dict(size=13)),
+            dict(x=0, y=0, text='Water',              showarrow=False, font=dict(size=13), yshift=-20),
+            dict(x=1, y=0, text=solvent2["name"],     showarrow=False, font=dict(size=13), yshift=-20),
+            dict(x=0, y=1, text=solvent1["name"],     showarrow=False, font=dict(size=13), xshift=-40),
         ],
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': False})
 
     # ── 統計 & データテーブル ────────────────────────────────────
     st.metric("検出タイライン数", len(tie_lines))
@@ -216,6 +227,244 @@ with tab_main:
         )
     else:
         st.info("2相分離点が検出されませんでした。温度を下げるか格子点数を増やしてください。")
+
+# ── 蒸気圧曲線タブ ────────────────────────────────────────────
+with tab_vp:
+    st.header("蒸気圧曲線")
+    col_vp1, col_vp2 = st.columns([1, 3])
+    with col_vp1:
+        vp_name = st.selectbox("成分", [s["name"] for s in ALL_SOLVENTS], key="vp_name")
+        vp_T_range = st.slider("温度範囲 (°C)", -50, 250, (0, 150), key="vp_T_range")
+        vp_sol = get_solvent_by_name(vp_name, ALL_SOLVENTS)
+        vp_tid = vp_sol.get("thermo_surrogate", vp_sol["thermo_id"])
+
+    with st.spinner("計算中..."):
+        try:
+            vp_data = calc_vapor_pressure_curve(vp_tid, vp_T_range[0], vp_T_range[1])
+        except Exception as e:
+            vp_data = None
+            with col_vp2:
+                st.error(f"計算エラー: {e}")
+
+    if vp_data:
+        with col_vp2:
+            if vp_data["T_bp_C"] is not None:
+                st.info(f"沸点 = **{vp_data['T_bp_C']:.1f} °C** @ 101.325 kPa")
+            else:
+                st.warning("沸点が指定温度範囲内にありません")
+            fig_vp = go.Figure()
+            fig_vp.add_trace(go.Scatter(
+                x=vp_data["T_C"], y=vp_data["P_kPa"],
+                name=vp_name, line=dict(color="royalblue", width=2),
+            ))
+            fig_vp.add_hline(y=101.325, line_dash="dash", line_color="red",
+                             annotation_text="101.325 kPa",
+                             annotation_position="bottom right")
+            if vp_data["T_bp_C"] is not None:
+                fig_vp.add_vline(x=vp_data["T_bp_C"], line_dash="dot",
+                                 line_color="orange",
+                                 annotation_text=f"{vp_data['T_bp_C']:.1f}°C")
+            fig_vp.update_layout(
+                xaxis_title="温度 (°C)", yaxis_title="蒸気圧 (kPa)",
+                title=f"{vp_name} 蒸気圧曲線",
+                height=450, plot_bgcolor="white",
+            )
+            st.plotly_chart(fig_vp, use_container_width=True)
+
+# ── VLE線図タブ ────────────────────────────────────────────────
+with tab_vle:
+    st.header("VLE線図（2成分系）")
+    col_v1, col_v2, col_v3 = st.columns(3)
+    with col_v1:
+        vle_s1_name = st.selectbox("成分 1", [s["name"] for s in ALL_SOLVENTS],
+                                    key="vle_s1")
+    with col_v2:
+        vle_s2_opts = [s["name"] for s in ALL_SOLVENTS if s["name"] != vle_s1_name]
+        vle_s2_name = st.selectbox("成分 2", vle_s2_opts, key="vle_s2")
+    with col_v3:
+        vle_P = st.number_input("圧力 (kPa)", min_value=1.0, value=101.325,
+                                 step=1.0, format="%.3f", key="vle_P")
+
+    run_vle = st.button("計算実行", key="run_vle", type="primary")
+
+    if run_vle:
+        vle_sol1 = get_solvent_by_name(vle_s1_name, ALL_SOLVENTS)
+        vle_sol2 = get_solvent_by_name(vle_s2_name, ALL_SOLVENTS)
+        with st.spinner("VLE計算中（初回はしばらくかかります）..."):
+            try:
+                vle_res = calc_vle_xy([vle_sol1, vle_sol2], vle_P)
+                st.session_state["vle_res"] = vle_res
+                st.session_state["vle_s1_saved"] = vle_s1_name
+                st.session_state["vle_s2_saved"] = vle_s2_name
+                st.session_state["vle_P_saved"] = vle_P
+            except Exception as e:
+                st.error(f"計算エラー: {e}")
+
+    if "vle_res" in st.session_state:
+        vle_res = st.session_state["vle_res"]
+        s1d = st.session_state.get("vle_s1_saved", vle_s1_name)
+        s2d = st.session_state.get("vle_s2_saved", vle_s2_name)
+        Pd = st.session_state.get("vle_P_saved", vle_P)
+        st.caption(f"計算結果: {s1d} – {s2d} @ {Pd:.3f} kPa")
+
+        col_xy, col_txy = st.columns(2)
+        with col_xy:
+            fig_xy = go.Figure()
+            fig_xy.add_trace(go.Scatter(
+                x=[0, 1], y=[0, 1], mode="lines",
+                line=dict(color="gray", dash="dash"),
+                showlegend=False, hoverinfo="skip",
+            ))
+            pts = [(x, y) for x, y in zip(vle_res["x1"], vle_res["y1"])
+                   if y is not None]
+            if pts:
+                xs, ys = zip(*pts)
+                fig_xy.add_trace(go.Scatter(
+                    x=list(xs), y=list(ys), name="VLE",
+                    line=dict(color="royalblue", width=2),
+                ))
+            fig_xy.update_layout(
+                title=f"xy線図 @ {Pd:.3f} kPa",
+                xaxis=dict(title=f"x₁ ({s1d})", range=[0, 1]),
+                yaxis=dict(title=f"y₁ ({s1d})", range=[0, 1]),
+                height=420, plot_bgcolor="white",
+            )
+            st.plotly_chart(fig_xy, use_container_width=True)
+
+        with col_txy:
+            fig_txy = go.Figure()
+            pts_b = [(x, T) for x, T in zip(vle_res["x1"], vle_res["T_bubble_C"])
+                     if T is not None]
+            pts_d = [(x, T) for x, T in zip(vle_res["x1"], vle_res["T_dew_C"])
+                     if T is not None]
+            if pts_b:
+                xs, Ts = zip(*pts_b)
+                fig_txy.add_trace(go.Scatter(
+                    x=list(xs), y=list(Ts), name="泡点",
+                    line=dict(color="blue", width=2),
+                ))
+            if pts_d:
+                xs, Ts = zip(*pts_d)
+                fig_txy.add_trace(go.Scatter(
+                    x=list(xs), y=list(Ts), name="露点",
+                    line=dict(color="orange", width=2, dash="dash"),
+                ))
+            fig_txy.update_layout(
+                title=f"T-xy線図 @ {Pd:.3f} kPa",
+                xaxis=dict(title=f"モル分率 ({s1d})", range=[0, 1]),
+                yaxis_title="温度 (°C)",
+                height=420, plot_bgcolor="white",
+            )
+            st.plotly_chart(fig_txy, use_container_width=True)
+
+# ── 濃縮シミュレーションタブ ───────────────────────────────────
+with tab_conc:
+    st.header("濃縮シミュレーション（レイリー蒸留）")
+    conc_n = st.radio("成分数", [2, 3, 4], horizontal=True, key="conc_n")
+    conc_unit = st.radio("単位", ["mol", "g", "mL"], horizontal=True, key="conc_unit")
+
+    cols_conc = st.columns(conc_n)
+    conc_names, conc_amts = [], []
+    for ci in range(conc_n):
+        with cols_conc[ci]:
+            sel = st.selectbox(f"成分 {ci+1}", [s["name"] for s in ALL_SOLVENTS],
+                               key=f"conc_sel_{ci}")
+            conc_names.append(sel)
+            amt = st.number_input(f"量 ({conc_unit})", min_value=0.0, value=1.0,
+                                   step=0.1, format="%.3f", key=f"conc_amt_{ci}")
+            conc_amts.append(amt)
+
+    col_cP, col_cT = st.columns(2)
+    with col_cP:
+        conc_P = st.number_input("圧力 (kPa)", min_value=1.0, value=101.325,
+                                   step=1.0, format="%.3f", key="conc_P")
+    with col_cT:
+        conc_T_ref = st.number_input("仕込み温度 (°C) ※mL換算用",
+                                      min_value=-50.0, max_value=200.0, value=25.0,
+                                      step=1.0, format="%.1f", key="conc_T_ref")
+    run_conc = st.button("計算実行", key="run_conc", type="primary")
+
+    if run_conc:
+        if len(set(conc_names)) < len(conc_names):
+            st.error("同一成分が複数選択されています。異なる成分を選択してください。")
+        else:
+            conc_sol_dicts = [get_solvent_by_name(nm, ALL_SOLVENTS) for nm in conc_names]
+            moles = []
+            for s, amt in zip(conc_sol_dicts, conc_amts):
+                if conc_unit == "mol":
+                    moles.append(amt)
+                elif conc_unit == "g":
+                    moles.append(amt / s["mw"])
+                else:  # mL
+                    rho = density_water(conc_T_ref) if s["name"] == "Water" else density_solvent(s, conc_T_ref)
+                    moles.append(amt * rho / s["mw"])
+
+            with st.spinner("レイリー蒸留計算中（初回はしばらくかかります）..."):
+                try:
+                    conc_result = calc_rayleigh_distillation(conc_sol_dicts, moles, conc_P)
+                    st.session_state["conc_result"] = conc_result
+                    st.session_state["conc_sol_dicts"] = conc_sol_dicts
+                    st.session_state["conc_unit_saved"] = conc_unit
+                    st.session_state["conc_T_ref_saved"] = conc_T_ref
+                    st.session_state["conc_P_saved"] = conc_P
+                except Exception as e:
+                    st.error(f"計算エラー: {e}")
+
+    if "conc_result" in st.session_state:
+        conc_result = st.session_state["conc_result"]
+        conc_sol_sv = st.session_state["conc_sol_dicts"]
+        unit_sv = st.session_state.get("conc_unit_saved", "mol")
+        P_sv = st.session_state.get("conc_P_saved", conc_P)
+        T_ref_sv = st.session_state.get("conc_T_ref_saved", 25.0)
+
+        def _mol_to_disp(mol_vals, s, unit):
+            if unit == "mol":
+                return mol_vals
+            elif unit == "g":
+                return [v * s["mw"] for v in mol_vals]
+            else:  # mL
+                rho = density_water(T_ref_sv) if s["name"] == "Water" else density_solvent(s, T_ref_sv)
+                return [v * s["mw"] / rho for v in mol_vals]
+
+        fig_conc = make_subplots(specs=[[{"secondary_y": True}]])
+        _colors = ["royalblue", "tomato", "green", "purple"]
+        total_disp = None
+        for idx, s in enumerate(conc_sol_sv):
+            mol_vals = conc_result["amounts"].get(s["name"], [])
+            disp_vals = _mol_to_disp(mol_vals, s, unit_sv)
+            fig_conc.add_trace(
+                go.Scatter(x=conc_result["evap_fraction"], y=disp_vals,
+                           name=s["name"], line=dict(color=_colors[idx % 4])),
+                secondary_y=False,
+            )
+            total_disp = disp_vals[:] if total_disp is None else [
+                a + b for a, b in zip(total_disp, disp_vals)]
+
+        if total_disp:
+            fig_conc.add_trace(
+                go.Scatter(x=conc_result["evap_fraction"], y=total_disp,
+                           name="合計", line=dict(color="black", dash="dash")),
+                secondary_y=False,
+            )
+
+        valid_T = [(ef, T) for ef, T in zip(conc_result["evap_fraction"],
+                                             conc_result["T_bp"]) if T is not None]
+        if valid_T:
+            efs, Ts = zip(*valid_T)
+            fig_conc.add_trace(
+                go.Scatter(x=list(efs), y=list(Ts), name="沸点 (°C)",
+                           line=dict(color="red", dash="dot", width=2)),
+                secondary_y=True,
+            )
+
+        fig_conc.update_yaxes(title_text=f"量 ({unit_sv})", secondary_y=False)
+        fig_conc.update_yaxes(title_text="沸点 (°C)", secondary_y=True)
+        fig_conc.update_xaxes(title_text="蒸発割合", range=[0, 1])
+        fig_conc.update_layout(
+            title=f"レイリー蒸留 @ {P_sv:.3f} kPa",
+            height=500, plot_bgcolor="white",
+        )
+        st.plotly_chart(fig_conc, use_container_width=True)
 
 with tab_logic:
     st.header("計算ロジック・数式説明")
