@@ -305,7 +305,7 @@ def _solvents_to_flasher_args(solvents: list):
 
 def _bubble_point_flash(flasher, P: float, zs: list,
                         T_lo: float = 250.0, T_hi: float = 450.0,
-                        n_bisect: int = 5, try_vf0: bool = True):
+                        n_bisect: int = 12, try_vf0: bool = True):
     """泡点フラッシュ。VF=0指定を試し、失敗時は T-P 二分探索にフォールバック。
 
     LL 分離が先行する異質共沸系（例: Water-Toluene 含む多成分系）では
@@ -354,7 +354,7 @@ def _bubble_point_flash(flasher, P: float, zs: list,
                 except Exception:
                     pass
 
-    # --- 二分探索（n_bisect 回、デフォルト 10 回 ≈ 0.04°C 精度 @ 40K 幅）---
+    # --- 二分探索（n_bisect 回、デフォルト 12 回 ≈ 0.05°C 精度 @ 200K 幅, 0.01°C @ 40K 幅）---
     for _ in range(n_bisect):
         T_mid = (_T_lo + _T_hi) / 2.0
         try:
@@ -395,7 +395,7 @@ def _dew_point_flash(flasher, P: float, zs: list,
 
     # Fallback: T-P 二分探索で vapor が完全になる T を探す
     _T_lo = T_bp_K if T_bp_K else 250.0
-    _T_hi = _T_lo + 80.0
+    _T_hi = _T_lo + 50.0
 
     # T_hi で VF >= 1 を確認し、なければ上方拡張
     _T_hi_ok = False
@@ -468,7 +468,7 @@ def calc_vapor_pressure_curve(thermo_id: str, T_min_C: float = 0.0,
             "T_valid_min_C": T_valid_min_C, "T_valid_max_C": T_valid_max_C}
 
 
-def _detect_three_phase(x1_list, T_b_list, y1_list, tol=0.5, min_points=3):
+def _detect_three_phase(x1_list, T_b_list, y1_list, tol=0.2, min_points=5):
     """泡点曲線のプラトー（三相域）を検出する。
 
     Returns: {"T3_C": float, "x_alpha": float, "x_beta": float, "y3": float}
@@ -512,7 +512,7 @@ def _detect_three_phase(x1_list, T_b_list, y1_list, tol=0.5, min_points=3):
     return {"T3_C": T3_C, "x_alpha": x_alpha, "x_beta": x_beta, "y3": y3}
 
 
-def calc_vle_xy(solvents: list, P_kPa: float, n: int = 80):
+def calc_vle_xy(solvents: list, P_kPa: float, n: int = 120):
     """2成分系 VLE xy 線図・T-xy 線図用データを計算する。
 
     solvents: 2成分の solvent dict リスト
@@ -522,13 +522,17 @@ def calc_vle_xy(solvents: list, P_kPa: float, n: int = 80):
     flasher = build_flasher_general(thermo_ids, unifac_overrides, vp_offsets)
     P = P_kPa * 1000.0
 
+    # VF=0 の実行可否を1点でプローブしてから全点に適用（LL系のタイムアウト42秒削減）
+    _probe_z = [0.5, 0.5]
+    _try_vf0 = _flash_vf0_timeout(flasher, P, _probe_z, timeout=0.35) is not None
+
     x1_list, y1_list, T_b_list, T_d_list = [], [], [], []
     for i in range(n + 1):
         z1 = i / n
         z = [z1, 1.0 - z1]
         y1, T_b, T_d = None, None, None
         try:
-            res_b = _bubble_point_flash(flasher, P, z)
+            res_b = _bubble_point_flash(flasher, P, z, try_vf0=_try_vf0)
             y1 = res_b.gas.zs[0] if res_b.gas else None
             T_b = res_b.T - 273.15
         except Exception:
@@ -572,6 +576,31 @@ def calc_vle_xy(solvents: list, P_kPa: float, n: int = 80):
         if plateau_xs:
             three_phase["x_alpha"] = min(plateau_xs)
             three_phase["x_beta"] = max(plateau_xs)
+
+        # T3 近傍の泡点を狭いウォームスタート範囲で再計算し精度向上
+        for idx, x1 in enumerate(x1_list):
+            if not (0.01 < x1 < 0.99):
+                continue
+            T_b = T_b_list[idx]
+            if T_b is not None and abs(T_b - T3_C) <= 3.0:
+                try:
+                    res_b = _bubble_point_flash(
+                        flasher, P, [x1, 1.0 - x1],
+                        T_lo=T3_K - 5.0, T_hi=T3_K + 5.0,
+                        n_bisect=12, try_vf0=False
+                    )
+                    T_b_list[idx] = res_b.T - 273.15
+                    if res_b.gas:
+                        y1_list[idx] = res_b.gas.zs[0]
+                except Exception:
+                    pass
+
+        # 不均一共沸点組成(y1≈y3)では露点=三相温度（ギブス相律: C=2,P=3→F=0）
+        y3 = three_phase.get("y3")
+        if y3 is not None:
+            for idx, y1 in enumerate(y1_list):
+                if y1 is not None and abs(y1 - y3) < 0.015:
+                    T_d_list[idx] = T3_C
 
         # T_dew は _dew_point_flash が計算した値を使う（V字形の露点曲線になる）
         # T_dew = T3 が正しいのは z1 ≈ y3 の組成のみ（物理的に正確）
