@@ -9,12 +9,12 @@ from ui_logic import render_logic_tab
 st.set_page_config(page_title="LLE/VLE calculator", layout="wide")
 st.title("LLE/VLE calculator")
 
-tab_lle, tab_vp, tab_vle, tab_conc, tab_logic = st.tabs([
-    "LLE線図", "蒸気圧曲線", "VLE線図", "濃縮シミュレーション", "ロジック"
+tab_vp, tab_lle, tab_vle, tab_conc, tab_logic = st.tabs([
+    "蒸気圧曲線", "LLE線図", "VLE線図", "濃縮シミュレーション", "ロジック"
 ])
 
-render_lle_tab(tab_lle)
 render_vp_tab(tab_vp)
+render_lle_tab(tab_lle)
 render_vle_tab(tab_vle)
 render_conc_tab(tab_conc)
 render_logic_tab(tab_logic)

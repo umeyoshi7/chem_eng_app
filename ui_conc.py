@@ -111,9 +111,9 @@ def render_conc_tab(tab):
             fig_conc.update_xaxes(title_text="蒸発割合", range=[0, 1])
             fig_conc.update_layout(
                 title=f"レイリー蒸留 @ {P_sv:.3f} kPa",
-                height=500, plot_bgcolor="white",
+                width=800, height=400, plot_bgcolor="white",
             )
-            st.plotly_chart(fig_conc, use_container_width=True)
+            st.plotly_chart(fig_conc, use_container_width=False)
 
             # 三相域注記: 沸点が一定な区間を検出してユーザーに説明
             T_bp_vals = [T for T in conc_result["T_bp"] if T is not None]

@@ -120,19 +120,109 @@ $$
 | mL | $n_i = (V_i \cdot \rho_i) / M_i$ |
 """)
 
-        with st.expander("5. scipy の使用箇所"):
+        with st.expander("5. 蒸気圧曲線"):
             st.markdown(r"""
-**Rachford-Rice 方程式の数値解法：**
+**蒸気圧の相関式（Antoine 式）：**
 
-thermo ライブラリは内部で `scipy.optimize` を使用してRachford-Rice方程式を解いています。
+thermo ライブラリは各化合物の蒸気圧を温度の関数として保持しています。代表的な形式は Antoine 式です：
 
-具体的には：
-- `scipy.optimize.brentq` または `scipy.optimize.ridder` などのブラケット法
-- 解の存在区間 $[\beta_{\min}, \beta_{\max}]$ を解析的に求めた後、数値的に根を求める
+$$
+\log_{10} P^{sat} = A - \frac{B}{C + T}
+$$
 
-**安定性テスト（TPD最小化）：**
+（$T$ は °C または K、$P^{sat}$ は mmHg または kPa。係数 $A, B, C$ は化合物ごとに異なる）
 
-`scipy.optimize.minimize` を用いて接平面距離関数を最小化し、相分離の判定を行います。
+**沸点の計算：**
 
-これらの計算はすべて `FlashVLN.flash()` 呼び出し内で自動的に処理されます。
+外部圧力 $P$ に対して $P^{sat}(T_{bp}) = P$ となる温度 $T_{bp}$ を二分探索で求めます。
+
+$$
+P^{sat}(T_{lo}) < P \leq P^{sat}(T_{hi}) \quad \Rightarrow \quad T_{mid} = \frac{T_{lo} + T_{hi}}{2}
+$$
+
+を繰り返し、収束したときの $T_{mid}$ が沸点です。
+
+**サロゲート化合物の補正：**
+
+UNIFAC グループデータがない化合物には、類似化合物（サロゲート）を代替として使用し、
+蒸気圧曲線を温度オフセット $\Delta T$ だけシフトすることで実測沸点に合わせます：
+
+$$
+P^{sat}_{\text{target}}(T) \approx P^{sat}_{\text{surrogate}}(T - \Delta T)
+$$
+""")
+
+        with st.expander("6. 気液平衡（VLE線図）"):
+            st.markdown(r"""
+**修正ラウールの法則：**
+
+$$
+y_i P = x_i \gamma_i(T, \mathbf{x})\, P_i^{sat}(T)
+$$
+
+ここで $\gamma_i$ は UNIFAC Dortmund モデルによる活量係数、$P_i^{sat}$ は純成分蒸気圧。
+
+**沸点（bubble point）温度の計算：**
+
+液相組成 $\mathbf{x}$ と圧力 $P$ が既知のとき、沸点条件は：
+
+$$
+\sum_i x_i \gamma_i(T, \mathbf{x})\, P_i^{sat}(T) = P
+$$
+
+この方程式を $T$ について二分探索で解きます。
+
+**露点（dew point）温度の計算：**
+
+気相組成 $\mathbf{y}$ と圧力 $P$ が既知のとき、露点条件は：
+
+$$
+\sum_i \frac{y_i P}{\gamma_i(T, \mathbf{x})\, P_i^{sat}(T)} = 1
+$$
+
+$\mathbf{x}$ と $T$ を同時に収束させる必要があるため、thermo ライブラリの `FlashVLN` が逐次代入法で解きます。
+
+**不均一共沸（三相系）：**
+
+水と非水溶性溶媒の混合系では、不均一共沸（heterogeneous azeotrope）が現れることがあります。
+三相共存温度 $T_3$ はスチーム蒸留方程式から推定します：
+
+$$
+\sum_i P_i^{sat}(T_3) = P
+$$
+
+この式は活量係数に依存しないため（完全非混和近似）、UNIFAC の誤差を受けません。
+$T_3$ は系中の最低沸点（Konovalov の第2法則）を下回る必要があり、それを超える場合は均一共沸の誤検出として除外します。
+""")
+
+        with st.expander("7. 濃縮シミュレーション（レイリー蒸留）"):
+            st.markdown(r"""
+**微分ステップ法：**
+
+各ステップで現在の液相を沸点フラッシュし、微小量 $\Delta V$ の蒸気を取り除くことを繰り返します。
+
+$$
+\Delta V = \frac{L_0}{N_{\text{steps}}}
+$$
+
+**物質収支（各ステップ）：**
+
+$$
+n_i^{(k+1)} = n_i^{(k)} - \Delta V \cdot y_i^{(k)}
+$$
+
+ここで $y_i^{(k)}$ はステップ $k$ における気相組成（沸点フラッシュで計算）。
+
+**総蒸発率：**
+
+$$
+f_{\text{evap}} = \frac{L_0 - L}{L_0}, \quad L = \sum_i n_i
+$$
+
+**三相域の高速化（Gibbs の相律）：**
+
+三相（気相 + 液相1 + 液相2）共存域では、自由度が $F = C - P + 2 = C - 1$（$C$ は成分数）となり、
+$T, P$ 固定のとき気相組成 $\mathbf{y}$ も固定されます。
+したがって三相域内では沸点フラッシュをスキップしてキャッシュした $T_3$ と $\mathbf{y}^{(3)}$ を再利用します。
+成分が枯渇し始めると $T$ が上昇するため、その時点でキャッシュを無効化して通常計算に戻ります。
 """)

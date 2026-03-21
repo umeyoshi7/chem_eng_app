@@ -468,48 +468,66 @@ def calc_vapor_pressure_curve(thermo_id: str, T_min_C: float = 0.0,
             "T_valid_min_C": T_valid_min_C, "T_valid_max_C": T_valid_max_C}
 
 
-def _detect_three_phase(x1_list, T_b_list, y1_list, tol=0.2, min_points=8):
+def _steam_distillation_T3(vp_funcs: list, P: float,
+                            T_lo: float = 270.0, T_hi: float = 460.0) -> float:
+    """純成分蒸気圧の和 = P となる温度 (K) を二分探索で求める。
+
+    完全非混和系での不均一共沸温度 T3 の推定に使用（スチーム蒸留方程式）。
+    Σ P_sat_i(T) = P は活量係数に依存しないため、UNIFAC の誤差を受けない。
+    """
+    P_sum = lambda T_K: sum(vp(T_K) for vp in vp_funcs)
+    # 探索範囲を P_sum の大小に合わせて調整
+    while P_sum(T_lo) >= P and T_lo > 200.0:
+        T_lo -= 20.0
+    while P_sum(T_hi) < P and T_hi < 600.0:
+        T_hi += 20.0
+    for _ in range(60):
+        T_mid = (T_lo + T_hi) / 2.0
+        if P_sum(T_mid) < P:
+            T_lo = T_mid
+        else:
+            T_hi = T_mid
+    return (T_lo + T_hi) / 2.0
+
+
+def _detect_three_phase(x1_list, T_b_list, y1_list, tol=1.0, min_points=8):
     """泡点曲線のプラトー（三相域）を検出する。
+
+    投票法（voting）により外れ値に強い三相温度 T3 を推定する。
+    各 T_b 値を候補として tol°C 以内の支持点数を数え、最多得票の温度を T3 とする。
+    連続グループ法と異なり、少数の外れ値があっても検出が崩れない。
 
     Returns: {"T3_C": float, "x_alpha": float, "x_beta": float, "y3": float}
     または None（検出不可）
     """
-    # 有効点のみ抽出（インデックス保持）
-    valid = [(i, x, T, y) for i, (x, T, y) in enumerate(zip(x1_list, T_b_list, y1_list))
-             if T is not None]
-    if len(valid) < min_points:
+    # 内部組成（端点を除外）のみ使用
+    interior = [(i, x, T, y) for i, (x, T, y) in enumerate(zip(x1_list, T_b_list, y1_list))
+                if T is not None and 0.001 < x < 0.999]
+    if len(interior) < min_points:
         return None
 
-    # 連続する min_points 点以上が tol°C 以内の平坦域を探す
-    best_group = []
-    current_group = [valid[0]]
+    # 投票法: 各 T_b 値を候補として tol°C 以内の点数を数える
+    T_vals = [T for _, _, T, _ in interior]
+    best_T, best_count = None, 0
+    for T_cand in T_vals:
+        count = sum(1 for T in T_vals if abs(T - T_cand) <= tol)
+        if count > best_count:
+            best_count = count
+            best_T = T_cand
 
-    for j in range(1, len(valid)):
-        prev_T = current_group[0][2]  # グループ先頭の温度
-        if abs(valid[j][2] - prev_T) <= tol:
-            current_group.append(valid[j])
-        else:
-            if len(current_group) > len(best_group):
-                best_group = current_group
-            current_group = [valid[j]]
-    if len(current_group) > len(best_group):
-        best_group = current_group
-
-    if len(best_group) < min_points:
+    if best_count < min_points:
         return None
 
-    x_alpha = best_group[0][1]
-    x_beta = best_group[-1][1]
+    plateau = [(i, x, T, y) for i, x, T, y in interior if abs(T - best_T) <= tol]
+    x_alpha = min(pt[1] for pt in plateau)
+    x_beta = max(pt[1] for pt in plateau)
 
-    # 純成分沸点との誤検出防止
-    # x_alpha ≈ 0 または x_beta ≈ 1 は純成分端点の誤検出
-    # < 0.001 の閾値: グリッド点 x1=0 のみ除外し、1/120=0.0083 の点は通す
-    # （water+hexane 等 x_alpha が 0.005-0.01 の高非混和系を検出可能にする）
+    # 純成分沸点との誤検出防止（端点 ≈ 0 または ≈ 1 の場合は純成分の誤検出）
     if x_alpha < 0.001 or x_beta > 0.999:
         return None
 
-    T3_C = sum(pt[2] for pt in best_group) / len(best_group)
-    y3_vals = [pt[3] for pt in best_group if pt[3] is not None]
+    T3_C = sum(pt[2] for pt in plateau) / len(plateau)
+    y3_vals = [pt[3] for pt in plateau if pt[3] is not None]
     y3 = sum(y3_vals) / len(y3_vals) if y3_vals else None
 
     return {"T3_C": T3_C, "x_alpha": x_alpha, "x_beta": x_beta, "y3": y3}
@@ -553,26 +571,40 @@ def calc_vle_xy(solvents: list, P_kPa: float, n: int = 120):
 
     three_phase = _detect_three_phase(x1_list, T_b_list, y1_list)
     if three_phase is not None:
-        T3_C = three_phase["T3_C"]
+        # 物理的検証: T3 は両純成分の沸点より低い必要がある（Konovalov の第2法則）
+        # 不均一共沸点 T3 は系中の最低沸点であり、必ず両端の純成分沸点を下回る。
+        # 均一共沸系の false positive では検出「T3」≈ 下端純成分沸点 となるため排除できる。
+        _T3 = three_phase["T3_C"]
+        _tb0 = T_b_list[0]    # x1=0 の純成分沸点
+        _tb1 = T_b_list[-1]   # x1=1 の純成分沸点
+        if _tb0 is not None and _tb1 is not None:
+            _T_min_pure = min(_tb0, _tb1)
+            if _T3 > _T_min_pure - 0.5:
+                three_phase = None  # T3 ≥ 純成分最低沸点 → 均一共沸の誤検出
 
-        # T3 でのフラッシュで三相域を正確に特定し、泡点を T3 に補完する
-        # VF > 0 at T3 → 気化開始温度が T3 以下 → 正しい T_b = T3
-        # （VF=0 fast path の準安定解や二分探索の偽VL収束を両方修正できる）
+    if three_phase is not None:
+        T3_C = three_phase["T3_C"]
         T3_K = T3_C + 273.15
+
+        # Step 1: T3 フラッシュで三相域を特定し T_b と y1 を補完する
+        # VF > 0 at T3 → 気化開始温度が T3 以下 → 正しい T_b = T3
+        # 「既に T3 近傍」の点もスキップせず全点を対象にする（初期計算の y1 が
+        # 準安定 VL 解から求まっている場合に y1 も合わせて修正するため）
         for idx, x1 in enumerate(x1_list):
             if not (0.001 < x1 < 0.999):
                 continue
             T_b = T_b_list[idx]
             if T_b is not None and abs(T_b - T3_C) <= 2.0:
-                continue  # 既に T3 近傍なら検証不要
+                continue  # 既に T3 近傍 → T_b 補正は不要（y1 は Step 3 で更新）
             try:
                 r_t3 = flasher.flash(T=T3_K, P=P, zs=[x1, 1.0 - x1])
                 if r_t3.gas is not None and r_t3.VF > 1e-6:
-                    T_b_list[idx] = T3_C  # 三相域: T_b = T3 が正しい
+                    T_b_list[idx] = T3_C
+                    y1_list[idx] = r_t3.gas.zs[0]
             except Exception:
                 pass
 
-        # 補完後に x_alpha, x_beta を更新（三相域の両端を再確定）
+        # Step 2: 補完後に x_alpha, x_beta を更新（三相域の両端を再確定）
         plateau_xs = [x for x, T_b in zip(x1_list, T_b_list)
                       if T_b is not None and abs(T_b - T3_C) <= 1.0
                       and 0.001 < x < 0.999]
@@ -580,10 +612,16 @@ def calc_vle_xy(solvents: list, P_kPa: float, n: int = 120):
             three_phase["x_alpha"] = min(plateau_xs)
             three_phase["x_beta"] = max(plateau_xs)
 
-        # T3 近傍の泡点を狭いウォームスタート範囲で再計算し精度向上
+        # Step 3: 三相域外の端部（x < x_alpha または x > x_beta）のみ精密化する
+        # 三相域内の組成は Step 1 の T3 補正を維持し、flasher が返す可能性のある
+        # 準安定 VL 解で上書きされるのを防ぐ
+        x_alpha_step2 = three_phase["x_alpha"]
+        x_beta_step2 = three_phase["x_beta"]
         for idx, x1 in enumerate(x1_list):
             if not (0.001 < x1 < 0.999):
                 continue
+            if x_alpha_step2 <= x1 <= x_beta_step2:
+                continue  # 三相域内はスキップ（Step 1 の補正を保護）
             T_b = T_b_list[idx]
             if T_b is not None and abs(T_b - T3_C) <= 3.0:
                 try:
@@ -598,15 +636,58 @@ def calc_vle_xy(solvents: list, P_kPa: float, n: int = 120):
                 except Exception:
                     pass
 
-        # 不均一共沸点組成(y1≈y3)では露点=三相温度（ギブス相律: C=2,P=3→F=0）
-        y3 = three_phase.get("y3")
+        # Step 4: 三相域全組成の T_b と y1 を T3・y3 に統一する
+        # 物理的根拠: 異質共沸点では T と気相組成は全体組成によらず一定（Gibbs 相律 F=0）
+        x_alpha_f = three_phase["x_alpha"]
+        x_beta_f = three_phase["x_beta"]
+        # y3 を三相域内の y1 平均値で更新（Step 1 の T3 フラッシュ結果を使用）
+        y3_vals_updated = [y1_list[idx] for idx, x1 in enumerate(x1_list)
+                           if y1_list[idx] is not None
+                           and x_alpha_f <= x1 <= x_beta_f
+                           and 0.001 < x1 < 0.999]
+        if y3_vals_updated:
+            y3 = sum(y3_vals_updated) / len(y3_vals_updated)
+            three_phase["y3"] = y3
+        else:
+            y3 = three_phase.get("y3")
+        # 三相域の T_b と y1 を強制適用（準安定解の混入を排除）
+        if y3 is not None:
+            for idx, x1 in enumerate(x1_list):
+                if x_alpha_f <= x1 <= x_beta_f and 0.001 < x1 < 0.999:
+                    T_b_list[idx] = T3_C
+                    y1_list[idx] = y3
+
+        # Step 5: 不均一共沸点組成(y1≈y3)では露点=三相温度（ギブス相律: C=2,P=3→F=0）
         if y3 is not None:
             for idx, y1 in enumerate(y1_list):
                 if y1 is not None and abs(y1 - y3) < 0.015:
                     T_d_list[idx] = T3_C
 
-        # T_dew は _dew_point_flash が計算した値を使う（V字形の露点曲線になる）
-        # T_dew = T3 が正しいのは z1 ≈ y3 の組成のみ（物理的に正確）
+        # Step 6: スチーム蒸留方程式による T3 補正
+        # 完全非混和系では Σ P_sat_i(T3) = P が成立し、活量係数不要で正確な T3 が得られる。
+        # UNIFAC が T3 を過小評価する系（例: Toluene-Water, MTHP-Water）で補正する。
+        # T3_steam が UNIFAC 値より 2°C 以上高い場合のみ上書き（均一系への誤適用を防止）。
+        try:
+            _vp_funcs = list(flasher.liquids[0].VaporPressures)
+            T3_steam_K = _steam_distillation_T3(_vp_funcs, P)
+            T3_steam_C = T3_steam_K - 273.15
+            T3_UNIFAC_C = three_phase["T3_C"]
+            if T3_steam_C > T3_UNIFAC_C + 2.0:
+                y3_steam = _vp_funcs[0](T3_steam_K) / P
+                three_phase["T3_C"] = T3_steam_C
+                three_phase["y3"] = y3_steam
+                x_alpha_f = three_phase["x_alpha"]
+                x_beta_f = three_phase["x_beta"]
+                for idx, x1 in enumerate(x1_list):
+                    if x_alpha_f <= x1 <= x_beta_f and 0.001 < x1 < 0.999:
+                        T_b_list[idx] = T3_steam_C
+                        y1_list[idx] = y3_steam
+                y3 = y3_steam
+                for idx, _y1 in enumerate(y1_list):
+                    if _y1 is not None and abs(_y1 - y3) < 0.015:
+                        T_d_list[idx] = T3_steam_C
+        except Exception:
+            pass
 
     return {"x1": x1_list, "y1": y1_list,
             "T_bubble_C": T_b_list, "T_dew_C": T_d_list,
@@ -644,6 +725,22 @@ def calc_rayleigh_distillation(solvents: list, initial_moles: list,
     _T_three_phase_K = None   # 三相温度 (K) 。None = 三相域未確定
     _three_phase_streak = 0   # 連続して同温度だったステップ数
     _THREE_PHASE_CONFIRM = 2  # この回数連続同温度で「三相域確定」とみなす
+
+    # スチーム蒸留 T3 補正の事前計算（2成分系のみ）
+    # Σ Psat_i(T3) = P を解いて T3_steam を求め、UNIFAC の過小評価を補正する。
+    # 均一系誤適用防止: UNIFAC T_bp が T3_steam より 3°C 以上低い場合のみ上書き。
+    _T3_steam_override_K = None
+    _y3_steam_override = None
+    if len(solvents) == 2:
+        try:
+            _vp_funcs_sd = list(flasher.liquids[0].VaporPressures)
+            _T3s_K = _steam_distillation_T3(_vp_funcs_sd, P)
+            _y3s_0 = _vp_funcs_sd[0](_T3s_K) / P
+            _y3s_1 = _vp_funcs_sd[1](_T3s_K) / P
+            _T3_steam_override_K = _T3s_K
+            _y3_steam_override = [_y3s_0, _y3s_1]
+        except Exception:
+            pass
 
     for step in range(n_steps + 1):
         total = sum(L)
@@ -741,6 +838,15 @@ def calc_rayleigh_distillation(solvents: list, initial_moles: list,
         y = list(res.gas.zs)
         T_bp = res.T - 273.15
         _T_bp_prev_K = res.T
+
+        # スチーム蒸留 T3 補正: UNIFAC が準安定 VL 解を返す場合に T3_steam で上書き
+        # 条件: 端点以外（全組成が 0.01 < z < 0.99）かつ UNIFAC T_bp < T3_steam − 3°C
+        if _T3_steam_override_K is not None:
+            _all_interior = all(0.01 < zi < 0.99 for zi in z)
+            if _all_interior and res.T < _T3_steam_override_K - 3.0:
+                T_bp = _T3_steam_override_K - 273.15
+                y = _y3_steam_override[:]
+                _T_bp_prev_K = _T3_steam_override_K
 
         # 三相域検出: 前ステップと T_bp が 0.05°C 以内で一致したらカウント
         if _T_three_phase_K is None:

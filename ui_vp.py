@@ -66,6 +66,6 @@ def render_vp_tab(tab):
                 fig_vp.update_layout(
                     xaxis_title="温度 (°C)", yaxis_title="蒸気圧 (kPa)",
                     title=f"{vp_name} 蒸気圧曲線",
-                    height=450, plot_bgcolor="white",
+                    width=480, height=480, plot_bgcolor="white",
                 )
-                st.plotly_chart(fig_vp, use_container_width=True)
+                st.plotly_chart(fig_vp, use_container_width=False)

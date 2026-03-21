@@ -59,9 +59,13 @@ def render_vle_tab(tab):
                     ))
                 fig_xy.update_layout(
                     title=f"xy線図 @ {Pd:.3f} kPa",
-                    xaxis=dict(title=f"x₁ ({s1d})", range=[0, 1]),
-                    yaxis=dict(title=f"y₁ ({s1d})", range=[0, 1]),
-                    height=420, plot_bgcolor="white",
+                    xaxis=dict(
+                        title=f"x₁ ({s1d})", range=[0, 1],
+                        scaleanchor="y", scaleratio=1,
+                        constrain="domain",
+                    ),
+                    yaxis=dict(title=f"y₁ ({s1d})", range=[0, 1], constrain="domain"),
+                    height=480, plot_bgcolor="white",
                 )
                 st.plotly_chart(fig_xy, use_container_width=True)
 
@@ -74,7 +78,7 @@ def render_vle_tab(tab):
                 if pts_b:
                     xs, Ts = zip(*pts_b)
                     fig_txy.add_trace(go.Scatter(
-                        x=list(xs), y=list(Ts), name="泡点",
+                        x=list(xs), y=list(Ts), name="沸点",
                         line=dict(color="blue", width=2),
                     ))
                 if pts_d:
@@ -107,6 +111,6 @@ def render_vle_tab(tab):
                     title=f"T-xy線図 @ {Pd:.3f} kPa",
                     xaxis=dict(title=f"モル分率 ({s1d})", range=[0, 1]),
                     yaxis_title="温度 (°C)",
-                    height=420, plot_bgcolor="white",
+                    width=480, height=480, plot_bgcolor="white",
                 )
-                st.plotly_chart(fig_txy, use_container_width=True)
+                st.plotly_chart(fig_txy, use_container_width=False)

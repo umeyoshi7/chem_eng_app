@@ -35,15 +35,15 @@ def render_lle_tab(tab):
                                         format="%.3f", key=f"amt_{solvent2['thermo_id']}")
             calc_layers = st.button("層分離計算", type="secondary")
 
-        # 溶媒または温度・格子点数が変わったらキャッシュをリセット → 自動再計算
+        # 溶媒または温度・格子点数が変わったらキャッシュをリセット
         calc_key = (solvent1["thermo_id"], solvent2["thermo_id"], T_C, n_grid)
         if st.session_state.get("lle_calc_key") != calc_key:
             for k in ["tie_lines", "binodal_pts", "T_C", "layer_result"]:
                 st.session_state.pop(k, None)
             st.session_state["lle_calc_key"] = calc_key
 
-        # LLE計算（条件変更時は自動実行、ボタンでも強制実行）
-        if run or "tie_lines" not in st.session_state:
+        # LLE計算（計算実行ボタンを押したときのみ実行）
+        if run:
             with st.spinner("LLE 計算中..."):
                 try:
                     tie_lines, binodal_pts = calc_lle_diagram(T_C, solvent1, solvent2, n_grid)
@@ -53,10 +53,13 @@ def render_lle_tab(tab):
             st.session_state["tie_lines"] = tie_lines
             st.session_state["binodal_pts"] = binodal_pts
             st.session_state["T_C"] = T_C
-        else:
+        elif "tie_lines" in st.session_state:
             tie_lines = st.session_state["tie_lines"]
             binodal_pts = st.session_state["binodal_pts"]
             T_C = st.session_state["T_C"]
+        else:
+            tie_lines = []
+            binodal_pts = []
 
         # 層分離計算
         layer_result = None
@@ -101,6 +104,8 @@ def render_lle_tab(tab):
 
         # 三角図（右カラム）
         with col_plot:
+            if not run and "tie_lines" not in st.session_state:
+                st.info("「計算実行」ボタンを押してください。")
             st.caption(f"Water – {solvent1['name']} – {solvent2['name']} | UNIFAC Dortmund モデル")
 
             fig = go.Figure()
