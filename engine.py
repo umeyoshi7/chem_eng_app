@@ -560,7 +560,7 @@ def calc_vle_xy(solvents: list, P_kPa: float, n: int = 120):
         # （VF=0 fast path の準安定解や二分探索の偽VL収束を両方修正できる）
         T3_K = T3_C + 273.15
         for idx, x1 in enumerate(x1_list):
-            if not (0.01 < x1 < 0.99):
+            if not (0.001 < x1 < 0.999):
                 continue
             T_b = T_b_list[idx]
             if T_b is not None and abs(T_b - T3_C) <= 2.0:
@@ -575,14 +575,14 @@ def calc_vle_xy(solvents: list, P_kPa: float, n: int = 120):
         # 補完後に x_alpha, x_beta を更新（三相域の両端を再確定）
         plateau_xs = [x for x, T_b in zip(x1_list, T_b_list)
                       if T_b is not None and abs(T_b - T3_C) <= 1.0
-                      and 0.01 < x < 0.99]
+                      and 0.001 < x < 0.999]
         if plateau_xs:
             three_phase["x_alpha"] = min(plateau_xs)
             three_phase["x_beta"] = max(plateau_xs)
 
         # T3 近傍の泡点を狭いウォームスタート範囲で再計算し精度向上
         for idx, x1 in enumerate(x1_list):
-            if not (0.01 < x1 < 0.99):
+            if not (0.001 < x1 < 0.999):
                 continue
             T_b = T_b_list[idx]
             if T_b is not None and abs(T_b - T3_C) <= 3.0:
