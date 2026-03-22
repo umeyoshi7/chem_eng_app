@@ -1,0 +1,8 @@
+.git
+.gitattributes
+.venv
+__pycache__
+*.pyc
+list.xlsx
+README.md
+.claude
