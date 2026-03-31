@@ -51,7 +51,7 @@ def create_flow_template():
     ws.sheet_view.showGridLines = False
 
     # タイトル
-    ws.merge_cells("A1:H1")
+    ws.merge_cells("A1:I1")
     t = ws["A1"]
     t.value = "製造フロー定義シート"
     t.font = Font(bold=True, size=14)
@@ -59,11 +59,11 @@ def create_flow_template():
     ws.row_dimensions[1].height = 28
 
     # 説明行
-    ws.merge_cells("A2:H2")
+    ws.merge_cells("A2:I2")
     d = ws["A2"]
     d.value = (
         "【記入方法】 工程番号は連番(1,2,3...)。前工程番号は複数の場合カンマ区切り(例: 1,2)。"
-        "  時間決定: 「手動」or「計算」。手動の場合は手動時間(分)に数値を入力。"
+        "  時間決定: 「手動」or「計算」。機器Tag No.: DBに登録された反応槽/フィルターのTag No.を入力（省略可）。"
     )
     d.font = NOTE_FONT
     d.fill = PatternFill("solid", fgColor="EBF5FB")
@@ -74,16 +74,13 @@ def create_flow_template():
     headers = [
         ("工程番号", 8), ("工程名", 24), ("操作タイプ", 14),
         ("前工程番号", 12), ("時間決定", 10), ("手動時間(分)", 12),
-        ("担当者", 12), ("備考", 28),
+        ("機器Tag No.", 12), ("担当者", 12), ("備考", 28),
     ]
     for col, (h, w) in enumerate(headers, 1):
         _h(ws, 3, col, h, w)
     ws.row_dimensions[3].height = 20
 
     # 操作タイプ選択肢（ドロップダウン用コメント）
-    op_comment = ws.cell(row=4, column=3)
-    op_comment.comment = None  # openpyxlのDataValidationを使用
-
     from openpyxl.worksheet.datavalidation import DataValidation
     dv_type = DataValidation(
         type="list",
@@ -104,17 +101,25 @@ def create_flow_template():
     dv_time.sqref = "E4:E100"
     ws.add_data_validation(dv_time)
 
-    # サンプルデータ
+    dv_equip = DataValidation(
+        type="list",
+        formula1='"R-101,R-102,R-103,R-104,R-105,F-101,F-102,F-201,C-101,C-201"',
+        showDropDown=False,
+    )
+    dv_equip.sqref = "G4:G100"
+    ws.add_data_validation(dv_equip)
+
+    # サンプルデータ (工程番号, 工程名, 操作タイプ, 前工程, 時間決定, 手動時間, 機器Tag, 担当者, 備考)
     sample_rows = [
-        (1, "原料仕込み",    "CHARGE",      "",  "手動", 30,  "担当A", "溶剤・原料を仕込む"),
-        (2, "加熱昇温",      "HEAT",        "1", "計算", "",  "担当A", "目標温度まで昇温"),
-        (3, "反応",          "REACTION",    "2", "計算", "",  "担当A", "反応速度解析より推算"),
-        (4, "冷却",          "COOL",        "3", "計算", "",  "担当B", "冷却水で冷却"),
-        (5, "晶析",          "OTHER",       "4", "手動", 60,  "担当B", "自然冷却晶析"),
-        (6, "ろ過",          "FILTER",      "5", "計算", "",  "担当B", "加圧ろ過"),
-        (7, "洗浄",          "WASH",        "6", "手動", 30,  "担当B", "洗液3回"),
-        (8, "濃縮",          "CONCENTRATE", "7", "計算", "",  "担当C", "溶媒回収"),
-        (9, "移液・仕上げ",  "TRANSFER",    "8", "手動", 20,  "担当C", "製品タンクへ移液"),
+        (1, "原料仕込み",    "CHARGE",      "",  "手動", 30,  "R-102",  "担当A", "溶剤・原料を仕込む"),
+        (2, "加熱昇温",      "HEAT",        "1", "計算", "",  "R-102",  "担当A", "目標温度まで昇温"),
+        (3, "反応",          "REACTION",    "2", "手動", 120, "R-102",  "担当A", "撹拌反応"),
+        (4, "冷却",          "COOL",        "3", "計算", "",  "R-102",  "担当B", "冷却水で冷却"),
+        (5, "晶析",          "OTHER",       "4", "手動", 60,  "R-102",  "担当B", "自然冷却晶析"),
+        (6, "ろ過",          "FILTER",      "5", "計算", "",  "F-102",  "担当B", "加圧ろ過"),
+        (7, "洗浄",          "WASH",        "6", "手動", 30,  "F-102",  "担当B", "洗液3回"),
+        (8, "濃縮",          "CONCENTRATE", "7", "手動", 90,  "R-103",  "担当C", "溶媒回収"),
+        (9, "移液・仕上げ",  "TRANSFER",    "8", "手動", 20,  "",       "担当C", "製品タンクへ移液"),
     ]
     fill_colors = ["FDFEFE", "FEF9E7"]
     for r, row in enumerate(sample_rows, start=4):
@@ -123,7 +128,7 @@ def create_flow_template():
             cell = ws.cell(row=r, column=c, value=val)
             cell.fill = fill
             cell.font = Font(size=10)
-            cell.alignment = CENTER if c != 2 else LEFT
+            cell.alignment = CENTER if c not in (2,) else LEFT
             cell.border = THIN
         ws.row_dimensions[r].height = 18
 

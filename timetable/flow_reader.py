@@ -43,6 +43,7 @@ class ProcessStep:
     manual_duration_min: float | None  # 手動入力時間（分）
     params: dict[str, Any]             # 計算用パラメータ
     note: str = ""
+    equipment_tag: str | None = None   # 使用機器の Tag No.（反応槽・フィルター等）
 
     @property
     def op_label(self) -> str:
@@ -176,6 +177,13 @@ def read_flow_excel(file_obj: io.BytesIO | str) -> ManufacturingFlow:
         note = str(row.get("備考", "")).strip()
         params = params_by_step.get(step_no, {})
 
+        # 機器Tag No.（任意列）
+        equipment_tag: str | None = None
+        if "機器Tag No." in df_flow.columns:
+            eq_raw = str(row.get("機器Tag No.", "")).strip()
+            if eq_raw and eq_raw.lower() not in ("nan", "none", ""):
+                equipment_tag = eq_raw
+
         step = ProcessStep(
             step_no=step_no,
             name=name,
@@ -185,6 +193,7 @@ def read_flow_excel(file_obj: io.BytesIO | str) -> ManufacturingFlow:
             manual_duration_min=manual_min,
             params=params,
             note=note,
+            equipment_tag=equipment_tag,
         )
         steps.append(step)
 
