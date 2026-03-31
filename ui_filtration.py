@@ -303,14 +303,11 @@ def render() -> None:
 
         # 共通入力（粘度・ろ材抵抗・面積・ケーキ量・ろ液量）
         st.markdown("**共通パラメータ**")
-        p1, p2, p3 = st.columns(3)
-        fi_mu = p1.number_input("粘度 μ [mPa·s]", 0.01, 10000.0, 1.0, format="%.3f", key="fi_t3_mu")
-        fi_Rm = p2.number_input("ろ材抵抗 Rm [m⁻¹]", 0.0, 1e15, 0.0, format="%.3e", key="fi_t3_Rm")
-        fi_A = p3.number_input("フィルター面積 A [m²]", 0.00001, 100.0, 0.01, format="%.5f", key="fi_t3_A")
-
-        p4, p5 = st.columns(2)
-        fi_m_cake = p4.number_input("乾燥ケーキ質量 [g]", 0.001, 1e7, 100.0, format="%.3f", key="fi_t3_m_cake")
-        fi_V_total = p5.number_input("総ろ液量 [L]", 0.001, 1e6, 10.0, format="%.3f", key="fi_t3_V_total")
+        fi_mu = st.number_input("粘度 μ [mPa·s]", 0.01, 10000.0, 1.0, format="%.3f", key="fi_t3_mu")
+        fi_Rm = st.number_input("ろ材抵抗 Rm [m⁻¹]", 0.0, 1e15, 0.0, format="%.3e", key="fi_t3_Rm")
+        fi_A = st.number_input("フィルター面積 A [m²]", 0.00001, 100.0, 0.01, format="%.5f", key="fi_t3_A")
+        fi_m_cake = st.number_input("乾燥ケーキ質量 [g]", 0.001, 1e7, 100.0, format="%.3f", key="fi_t3_m_cake")
+        fi_V_total = st.number_input("総ろ液量 [L]", 0.001, 1e6, 10.0, format="%.3f", key="fi_t3_V_total")
 
         # 方式別入力
         if fi_mode == "加圧ろ過":
@@ -321,11 +318,10 @@ def render() -> None:
             )
         else:
             st.markdown("**遠心ろ過パラメータ**")
-            pr1, pr2, pr3, pr4 = st.columns(4)
-            fi_RPM = pr1.number_input("RPM", 100.0, 50000.0, 3000.0, format="%.0f", key="fi_t3_RPM")
-            fi_r_in = pr2.number_input("内半径 [m]", 0.001, 5.0, 0.05, format="%.3f", key="fi_t3_r_in")
-            fi_r_out = pr3.number_input("外半径 [m]", 0.001, 5.0, 0.15, format="%.3f", key="fi_t3_r_out")
-            fi_rho = pr4.number_input("液密度 ρ [g/mL]", 0.3, 3.0, 1.0, format="%.3f", key="fi_t3_rho")
+            fi_RPM = st.number_input("RPM", 100.0, 50000.0, 3000.0, format="%.0f", key="fi_t3_RPM")
+            fi_r_in = st.number_input("内半径 [m]", 0.001, 5.0, 0.05, format="%.3f", key="fi_t3_r_in")
+            fi_r_out = st.number_input("外半径 [m]", 0.001, 5.0, 0.15, format="%.3f", key="fi_t3_r_out")
+            fi_rho = st.number_input("液密度 ρ [g/mL]", 0.3, 3.0, 1.0, format="%.3f", key="fi_t3_rho")
 
             if fi_r_out > fi_r_in:
                 omega = 2 * math.pi * fi_RPM / 60.0

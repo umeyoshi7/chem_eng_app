@@ -45,6 +45,7 @@ def _init_state() -> None:
         "ct_rayleigh_fingerprint": None,
         "ct_rayleigh_solvents": None,
         "ct_time_result": None,
+        "ct_conc_src": "手動入力",
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -170,36 +171,67 @@ def render() -> None:
 
     with col_left:
         st.subheader("溶媒組成")
-        conc_n = st.radio("成分数", [2, 3, 4], horizontal=True, key="ct_n")
-        conc_unit = st.radio("単位", ["mol", "g", "mL"], horizontal=True, key="ct_unit")
+        conc_src = st.radio(
+            "入力元",
+            ["手動入力", "濃縮シミュレーションから引用"],
+            horizontal=True,
+            key="ct_conc_src",
+        )
 
-        cols_solv = st.columns(conc_n)
-        ct_names, ct_amts = [], []
-        for ci in range(conc_n):
-            with cols_solv[ci]:
-                sel = st.selectbox(
-                    f"成分 {ci + 1}", _SOLVENT_NAMES,
-                    key=f"ct_sel_{ci}",
-                )
-                ct_names.append(sel)
-                amt = st.number_input(
-                    f"量 ({conc_unit})", min_value=0.0, value=1.0,
-                    step=0.1, format="%.3f", key=f"ct_amt_{ci}",
-                )
-                ct_amts.append(amt)
+        if conc_src == "濃縮シミュレーションから引用":
+            conc_result_ref = st.session_state.get("conc_result")
+            if conc_result_ref is None:
+                st.warning("先に濃縮シミュレーションを実行してください。")
+                ct_names, ct_amts, conc_unit, ct_P, ct_T_ref, sol_dicts = [], [], "mol", 101.325, 25.0, []
+                _conc_src_ready = False
+            else:
+                sol_dicts = st.session_state["conc_sol_dicts"]
+                ct_names = [s["name"] for s in sol_dicts]
+                conc_unit = st.session_state.get("conc_unit_saved", "mol")
+                ct_P = st.session_state.get("conc_P_saved", 101.325)
+                ct_T_ref = st.session_state.get("conc_T_ref_saved", 25.0)
 
-        col_cP, col_cT = st.columns(2)
-        with col_cP:
-            ct_P = st.number_input(
-                "圧力 (kPa)", min_value=1.0, value=101.325,
-                step=1.0, format="%.3f", key="ct_P",
-            )
-        with col_cT:
-            ct_T_ref = st.number_input(
-                "仕込み温度 (°C) ※mL換算用",
-                min_value=-50.0, max_value=200.0, value=25.0,
-                step=1.0, format="%.1f", key="ct_T_ref",
-            )
+                # 引用元の初期量を amounts の最初のステップから取得
+                ct_amts = [conc_result_ref["amounts"][nm][0] for nm in ct_names]
+
+                lines = [f"- 溶媒: {', '.join(ct_names)}"]
+                lines.append(f"- 圧力: {ct_P:.3f} kPa")
+                lines.append(f"- 仕込み温度: {ct_T_ref:.1f} °C")
+                st.info("**濃縮シミュレーションの設定を引用**\n" + "\n".join(lines))
+                _conc_src_ready = True
+        else:
+            _conc_src_ready = True
+            conc_n = st.radio("成分数", [2, 3, 4], horizontal=True, key="ct_n")
+            conc_unit = st.radio("単位", ["mol", "g", "mL"], horizontal=True, key="ct_unit")
+
+            cols_solv = st.columns(conc_n)
+            ct_names, ct_amts = [], []
+            for ci in range(conc_n):
+                with cols_solv[ci]:
+                    sel = st.selectbox(
+                        f"成分 {ci + 1}", _SOLVENT_NAMES,
+                        key=f"ct_sel_{ci}",
+                    )
+                    ct_names.append(sel)
+                    amt = st.number_input(
+                        f"量 ({conc_unit})", min_value=0.0, value=1.0,
+                        step=0.1, format="%.3f", key=f"ct_amt_{ci}",
+                    )
+                    ct_amts.append(amt)
+
+            col_cP, col_cT = st.columns(2)
+            with col_cP:
+                ct_P = st.number_input(
+                    "圧力 (kPa)", min_value=1.0, value=101.325,
+                    step=1.0, format="%.3f", key="ct_P",
+                )
+            with col_cT:
+                ct_T_ref = st.number_input(
+                    "仕込み温度 (°C) ※mL換算用",
+                    min_value=-50.0, max_value=200.0, value=25.0,
+                    step=1.0, format="%.1f", key="ct_T_ref",
+                )
+            sol_dicts = None  # 手動入力時は計算ブロックで取得
 
     with col_right:
         st.subheader("反応槽仕様")
@@ -269,48 +301,56 @@ def render() -> None:
     # ════════════════════════════════════════════════════════════════════════
     # 計算実行ボタン
     # ════════════════════════════════════════════════════════════════════════
-    run_btn = st.button("計算実行", key="run_ct", type="primary")
+    run_btn = st.button(
+        "計算実行", key="run_ct", type="primary",
+        disabled=(conc_src == "濃縮シミュレーションから引用" and not _conc_src_ready),
+    )
 
     if run_btn:
-        # 入力バリデーション
-        if len(set(ct_names)) < len(ct_names):
-            st.error("同一成分が複数選択されています。異なる成分を選択してください。")
-            st.stop()
-
-        sol_dicts = [get_solvent_by_name(nm, ALL_SOLVENTS) for nm in ct_names]
-
-        # mol 換算
-        moles = []
-        for s, amt in zip(sol_dicts, ct_amts):
-            if conc_unit == "mol":
-                moles.append(amt)
-            elif conc_unit == "g":
-                moles.append(amt / s["mw"])
-            else:  # mL
-                rho = density_water(ct_T_ref) if s["name"] == "Water" else density_solvent(s, ct_T_ref)
-                moles.append(amt * rho / s["mw"])
-
-        # フィンガープリントで Rayleigh 計算の再実行を判断
-        fingerprint = (tuple(ct_names), tuple(round(m, 6) for m in moles), round(ct_P, 4))
-
-        if st.session_state["ct_rayleigh_fingerprint"] != fingerprint:
-            with st.spinner("レイリー蒸留計算中（初回はしばらくかかります）..."):
-                try:
-                    rayleigh_result = calc_rayleigh_distillation(sol_dicts, moles, ct_P)
-                    st.session_state["ct_rayleigh_result"] = rayleigh_result
-                    st.session_state["ct_rayleigh_solvents"] = sol_dicts
-                    st.session_state["ct_rayleigh_fingerprint"] = fingerprint
-                except Exception as e:
-                    st.error(f"レイリー蒸留計算エラー: {e}")
-                    st.stop()
+        if conc_src == "濃縮シミュレーションから引用":
+            # 濃縮シミュレーション結果をそのまま利用（Rayleigh 再計算不要）
+            rayleigh_result = st.session_state["conc_result"]
+            sol_dicts_calc = st.session_state["conc_sol_dicts"]
         else:
-            rayleigh_result = st.session_state["ct_rayleigh_result"]
-            sol_dicts = st.session_state["ct_rayleigh_solvents"]
+            # 手動入力: 入力バリデーション → mol 換算 → Rayleigh 計算
+            if len(set(ct_names)) < len(ct_names):
+                st.error("同一成分が複数選択されています。異なる成分を選択してください。")
+                st.stop()
+
+            sol_dicts_calc = [get_solvent_by_name(nm, ALL_SOLVENTS) for nm in ct_names]
+
+            # mol 換算
+            moles = []
+            for s, amt in zip(sol_dicts_calc, ct_amts):
+                if conc_unit == "mol":
+                    moles.append(amt)
+                elif conc_unit == "g":
+                    moles.append(amt / s["mw"])
+                else:  # mL
+                    rho = density_water(ct_T_ref) if s["name"] == "Water" else density_solvent(s, ct_T_ref)
+                    moles.append(amt * rho / s["mw"])
+
+            # フィンガープリントで Rayleigh 計算の再実行を判断
+            fingerprint = (tuple(ct_names), tuple(round(m, 6) for m in moles), round(ct_P, 4))
+
+            if st.session_state["ct_rayleigh_fingerprint"] != fingerprint:
+                with st.spinner("レイリー蒸留計算中（初回はしばらくかかります）..."):
+                    try:
+                        rayleigh_result = calc_rayleigh_distillation(sol_dicts_calc, moles, ct_P)
+                        st.session_state["ct_rayleigh_result"] = rayleigh_result
+                        st.session_state["ct_rayleigh_solvents"] = sol_dicts_calc
+                        st.session_state["ct_rayleigh_fingerprint"] = fingerprint
+                    except Exception as e:
+                        st.error(f"レイリー蒸留計算エラー: {e}")
+                        st.stop()
+            else:
+                rayleigh_result = st.session_state["ct_rayleigh_result"]
+                sol_dicts_calc = st.session_state["ct_rayleigh_solvents"]
 
         # 濃縮時間積算
         try:
             time_result = _calc_concentration_time(
-                rayleigh_result, sol_dicts, reactor, T_jacket,
+                rayleigh_result, sol_dicts_calc, reactor, T_jacket,
             )
             st.session_state["ct_time_result"] = {
                 **time_result,
