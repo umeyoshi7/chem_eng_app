@@ -2,8 +2,9 @@
 タイムテーブル Excel 出力モジュール
 
 出力シート:
-  "タイムテーブル" : 工程リスト（開始時刻・終了時刻・所要時間）
-  "Ganttチャート"  : 横軸=時間のガントチャート（1セル=30分）
+  "タイムテーブル"   : 工程リスト（開始時刻・終了時刻・所要時間・機器Tag No.）
+  "Ganttチャート"    : 横軸=時間、縦軸=工程のガントチャート（1セル=30分）
+  "機器別Gantt"      : 横軸=時間、縦軸=機器の並列ガントチャート（1セル=30分）
 """
 
 from __future__ import annotations
@@ -98,16 +99,17 @@ def _write_timetable_sheet(wb: openpyxl.Workbook, flow: ManufacturingFlow,
 
     # ヘッダー行
     headers = [
-        ("工程番号", 8),
-        ("工程名",   22),
-        ("操作タイプ", 12),
-        ("前工程",    10),
-        ("時間決定",  10),
-        ("開始時刻",  10),
-        ("終了時刻",  10),
+        ("工程番号",     8),
+        ("工程名",       22),
+        ("機器Tag No.",  12),
+        ("操作タイプ",   12),
+        ("前工程",       10),
+        ("時間決定",     10),
+        ("開始時刻",     10),
+        ("終了時刻",     10),
         ("所要時間(分)", 12),
-        ("所要時間(h)", 12),
-        ("備考",      24),
+        ("所要時間(h)",  12),
+        ("備考",         24),
     ]
     for col_idx, (h, w) in enumerate(headers, start=1):
         _set_header(ws, 2, col_idx, h, w)
@@ -125,19 +127,21 @@ def _write_timetable_sheet(wb: openpyxl.Workbook, flow: ManufacturingFlow,
         end_real   = _minutes_to_hhmm(start_offset + end_min)
         dur_h      = round(dur_min / 60, 2)
 
-        fill = OP_COLORS.get(step.op_type, OP_COLORS["OTHER"])
+        fill     = OP_COLORS.get(step.op_type, OP_COLORS["OTHER"])
         prev_str = ", ".join(str(p) for p in step.prev_steps) if step.prev_steps else "-"
+        eq_tag   = step.equipment_tag or "-"
 
-        _set_body(ws, r, 1, step.step_no, CENTER, fill)
-        _set_body(ws, r, 2, step.name,   LEFT,   fill)
-        _set_body(ws, r, 3, step.op_label, CENTER, fill)
-        _set_body(ws, r, 4, prev_str,    CENTER, fill)
-        _set_body(ws, r, 5, step.time_method, CENTER, fill)
-        _set_body(ws, r, 6, start_real,  CENTER, fill)
-        _set_body(ws, r, 7, end_real,    CENTER, fill)
-        _set_body(ws, r, 8, round(dur_min, 1), CENTER, fill)
-        _set_body(ws, r, 9, dur_h,       CENTER, fill)
-        _set_body(ws, r, 10, step.note,  LEFT,   fill)
+        _set_body(ws, r,  1, step.step_no,      CENTER, fill)
+        _set_body(ws, r,  2, step.name,          LEFT,   fill)
+        _set_body(ws, r,  3, eq_tag,             CENTER, fill)
+        _set_body(ws, r,  4, step.op_label,      CENTER, fill)
+        _set_body(ws, r,  5, prev_str,           CENTER, fill)
+        _set_body(ws, r,  6, step.time_method,   CENTER, fill)
+        _set_body(ws, r,  7, start_real,         CENTER, fill)
+        _set_body(ws, r,  8, end_real,           CENTER, fill)
+        _set_body(ws, r,  9, round(dur_min, 1),  CENTER, fill)
+        _set_body(ws, r, 10, dur_h,              CENTER, fill)
+        _set_body(ws, r, 11, step.note,          LEFT,   fill)
         ws.row_dimensions[r].height = 18
 
     # 凡例
@@ -156,6 +160,133 @@ def _write_timetable_sheet(wb: openpyxl.Workbook, flow: ManufacturingFlow,
         )
 
     ws.freeze_panes = "A3"
+
+
+# ---------------------------------------------------------------------------
+# シート3: 機器別 Gantt チャート
+# ---------------------------------------------------------------------------
+
+def _write_equipment_gantt_sheet(wb: openpyxl.Workbook, flow: ManufacturingFlow,
+                                  schedule: dict, start_hour: float = 8.0):
+    """機器ごとを1行とする並列 Gantt チャートシートを追加する。"""
+    ws = wb.create_sheet("機器別Gantt")
+    ws.sheet_view.showGridLines = False
+
+    if not schedule:
+        return
+
+    # 機器ごとにステップを集約（最初の登場順を保持）
+    seen_lanes: list[str] = []
+    eq_to_steps: dict[str, list] = {}
+    for step in flow.steps:
+        lane = step.equipment_tag if step.equipment_tag else f"[{step.step_no}] {step.name}"
+        if lane not in eq_to_steps:
+            seen_lanes.append(lane)
+            eq_to_steps[lane] = []
+        eq_to_steps[lane].append(step)
+
+    total_min = max(v["end"] for v in schedule.values())
+    n_cells   = math.ceil(total_min / GANTT_CELL_MIN) + 1
+
+    FIXED_COLS      = 2   # 機器Tag No., 種別
+    GANTT_START_COL = FIXED_COLS + 1
+
+    # タイトル
+    last_col = GANTT_START_COL + n_cells - 1
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    t = ws.cell(row=1, column=1, value="機器別Ganttチャート")
+    t.font      = TITLE_FONT
+    t.alignment = CENTER
+    ws.row_dimensions[1].height = 26
+
+    # 固定列ヘッダー
+    _set_header(ws, 2, 1, "機器Tag No.", 14)
+    _set_header(ws, 2, 2, "種別",         10)
+
+    # 時間軸ヘッダー
+    current_day = 0
+    for i in range(n_cells):
+        col     = GANTT_START_COL + i
+        abs_min = start_hour * 60 + i * GANTT_CELL_MIN
+        day     = int(abs_min // (24 * 60))
+        hour    = int((abs_min % (24 * 60)) // 60)
+        minute  = int(abs_min % 60)
+        ws.column_dimensions[get_column_letter(col)].width = 3.5
+        if minute == 0:
+            label = f"Day{day+1}\n{hour:02d}:00" if day != current_day else f"{hour:02d}:00"
+            current_day = day
+            c2 = ws.cell(row=2, column=col, value=label)
+            c2.fill      = HEADER_FILL
+            c2.font      = Font(color="FFFFFF", bold=True, size=8)
+            c2.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            c2.border    = THIN_BORDER
+        else:
+            c2 = ws.cell(row=2, column=col)
+            c2.fill   = HEADER_FILL
+            c2.border = THIN_BORDER
+    ws.row_dimensions[2].height = 28
+
+    # データ行：機器ごとに1行
+    for r, lane in enumerate(seen_lanes, start=3):
+        steps_in_lane = eq_to_steps[lane]
+
+        # 機器種別を Tag No. プレフィクスから推定
+        if lane.startswith("R-"):
+            equip_type = "反応槽"
+        elif lane.startswith("F-"):
+            equip_type = "フィルター"
+        elif lane.startswith("C-"):
+            equip_type = "遠心ろ過"
+        else:
+            equip_type = "-"
+
+        _set_body(ws, r, 1, lane,        CENTER)
+        _set_body(ws, r, 2, equip_type,  CENTER)
+        ws.row_dimensions[r].height = 22
+
+        # 背景（空セル）
+        for ci in range(n_cells):
+            col  = GANTT_START_COL + ci
+            cell = ws.cell(row=r, column=col)
+            cell.fill   = PatternFill("solid", fgColor="F8F9FA")
+            cell.border = Border(
+                left=Side(style="hair"), right=Side(style="hair"),
+                top=Side(style="hair"),  bottom=Side(style="hair"),
+            )
+
+        # 各工程のバーを描画
+        for step in steps_in_lane:
+            sch        = schedule.get(step.step_no, {})
+            start_min  = sch.get("start", 0.0)
+            end_min    = sch.get("end",   0.0)
+            fill_color = OP_COLORS.get(step.op_type, OP_COLORS["OTHER"])
+            start_cell = int(start_min / GANTT_CELL_MIN)
+            end_cell   = math.ceil(end_min / GANTT_CELL_MIN)
+
+            for ci in range(start_cell, min(end_cell, n_cells)):
+                col  = GANTT_START_COL + ci
+                cell = ws.cell(row=r, column=col)
+                cell.fill   = PatternFill("solid", fgColor=fill_color)
+                cell.border = Border(
+                    left=Side(style="hair"), right=Side(style="hair"),
+                    top=Side(style="hair"),  bottom=Side(style="hair"),
+                )
+                # バー中央セルに工程名を表示
+                mid_ci = start_cell + (end_cell - start_cell) // 2
+                if ci == mid_ci and (end_cell - start_cell) >= 2:
+                    cell.value     = f"[{step.step_no}] {step.name}"
+                    cell.font      = Font(size=8, bold=True)
+                    cell.alignment = CENTER
+
+    # 開始時刻縦線（左端強調）
+    for r in range(2, len(seen_lanes) + 3):
+        c = ws.cell(row=r, column=GANTT_START_COL)
+        c.border = Border(
+            left=Side(style="medium"), right=Side(style="hair"),
+            top=Side(style="hair"),   bottom=Side(style="hair"),
+        )
+
+    ws.freeze_panes = ws.cell(row=3, column=GANTT_START_COL)
 
 
 # ---------------------------------------------------------------------------
@@ -299,6 +430,7 @@ def write_timetable_excel(
     wb = openpyxl.Workbook()
     _write_timetable_sheet(wb, flow, schedule, start_hour)
     _write_gantt_sheet(wb, flow, schedule, start_hour)
+    _write_equipment_gantt_sheet(wb, flow, schedule, start_hour)
 
     buf = io.BytesIO()
     wb.save(buf)

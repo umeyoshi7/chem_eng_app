@@ -5,6 +5,14 @@ import pandas as pd
 
 from .models import ReactorSpec
 
+# Repository パターンの re-export（バックエンド切り替え時はこちらを使用）
+from .equipment_repo import (  # noqa: F401
+    get_equipment_repo,
+    EquipmentRepository,
+    EquipmentItem,
+    FilterSpec,
+)
+
 _DEFAULT_DB = Path(__file__).parent.parent / "reactor_db.xlsx"
 
 
@@ -16,7 +24,7 @@ def load_reactor_db(path: Path | None = None) -> pd.DataFrame:
 
 
 def list_tag_nos(path: Path | None = None) -> list[str]:
-    """DB 内の全 Tag No. を返す。"""
+    """DB 内の反応槽 Tag No. を返す。"""
     df = load_reactor_db(path)
     return df["Tag No."].tolist()
 
