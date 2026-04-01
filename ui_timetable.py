@@ -668,7 +668,7 @@ def _render_inner():
                                     else step.params.get("ケーク比抵抗α", 5e11)),
                         format="%e", key=f"fi_al_{step.step_no}",
                     )
-                    p4, p5, p6 = st.columns(3)
+                    p4, p5, p6, p7 = st.columns(4)
                     Rm = p4.number_input(
                         "ろ材抵抗Rm [m⁻¹]",
                         value=float(step.params.get("ろ材抵抗Rm", {}).get("value", 1e10)
@@ -676,14 +676,21 @@ def _render_inner():
                                     else step.params.get("ろ材抵抗Rm", 1e10)),
                         format="%e", key=f"fi_rm_{step.step_no}",
                     )
-                    mc = p5.number_input(
+                    A_fi = p5.number_input(
+                        "ろ過面積A [m²]", min_value=0.001,
+                        value=float(step.params.get("ろ過面積A", {}).get("value", 1.0)
+                                    if isinstance(step.params.get("ろ過面積A"), dict)
+                                    else step.params.get("ろ過面積A", 1.0)),
+                        format="%.3f", key=f"fi_area_{step.step_no}",
+                    )
+                    mc = p6.number_input(
                         "乾燥ケーキ質量 [g]", min_value=0.0,
                         value=float(step.params.get("乾燥ケーキ質量", {}).get("value", 1000.0)
                                     if isinstance(step.params.get("乾燥ケーキ質量"), dict)
                                     else step.params.get("乾燥ケーキ質量", 1000.0)),
                         key=f"fi_mc_{step.step_no}",
                     )
-                    vt = p6.number_input(
+                    vt = p7.number_input(
                         "総ろ液量 [L]", min_value=0.1,
                         value=float(step.params.get("総ろ液量", {}).get("value", 100.0)
                                     if isinstance(step.params.get("総ろ液量"), dict)
@@ -692,7 +699,7 @@ def _render_inner():
                     )
                     step.params.update({
                         "差圧ΔP": dP, "ろ液粘度μ": mu, "ケーク比抵抗α": alpha,
-                        "ろ材抵抗Rm": Rm, "乾燥ケーキ質量": mc, "総ろ液量": vt,
+                        "ろ材抵抗Rm": Rm, "ろ過面積A": A_fi, "乾燥ケーキ質量": mc, "総ろ液量": vt,
                     })
 
         # 手動時間の上書きを適用
