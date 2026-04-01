@@ -348,7 +348,124 @@ $$
 ここで $\dot{Q}_{\text{rxn}} = Q_{\text{rxn,total}} \times 10^3 / t_{\text{add}}$ [W] は添加中の反応発熱速度。
 """)
 
-        with st.expander("6. 密度・単位変換（共通）"):
+        with st.expander("6. 濃縮時間推算"):
+            st.markdown(r"""
+#### 計算フロー概要
+
+濃縮シミュレーション（Rayleigh 蒸留）の結果を用い、各蒸発ステップの熱移動から累積時間を積算する。
+
+1. Rayleigh 蒸留の各ステップで液量・沸点・混合蒸発エンタルピーを取得
+2. 反応槽形状から伝熱面積を算出（鏡板＋胴体 → 伝熱計算セクション参照）
+3. 熱移動量と蒸発速度からステップ時間を計算
+4. 全ステップで累積し、蒸発分率 vs 時間の曲線を得る
+
+---
+
+#### 伝熱による熱移動量
+
+$$
+Q = U \cdot A_{\text{total}} \cdot (T_{\text{jacket}} - T_{\text{bp}}) \quad [\text{W}]
+$$
+
+ここで $T_{\text{bp}}$ は現在の液相沸点 [°C]、$T_{\text{jacket}}$ はジャケット温度 [°C]。
+
+---
+
+#### 蒸発速度と時間積算
+
+**蒸発速度（mol/s）：**
+
+$$
+\frac{dn}{dt} = \frac{Q}{\Delta H_{\text{vap,mix}}} \quad [\text{mol/s}]
+$$
+
+$\Delta H_{\text{vap,mix}}$ は液相組成から計算した混合蒸発エンタルピー [J/mol]。
+
+**各ステップの所要時間：**
+
+$$
+\Delta t = \frac{\Delta n}{dn/dt} = \frac{\Delta n \cdot \Delta H_{\text{vap,mix}}}{Q} \quad [\text{s}]
+$$
+
+$\Delta n$ は 1 ステップの蒸発モル数（Rayleigh 蒸留の刻み幅）。
+
+**累積時間：**
+
+$$
+t_k = \sum_{j=1}^{k} \Delta t_j
+$$
+
+---
+
+#### 注意事項
+
+- $T_{\text{jacket}} \leq T_{\text{bp}}$ の場合、伝熱方向が逆転するため蒸発不可（警告を表示）
+- 蒸発エンタルピーが取得できない成分は 40 kJ/mol（代替値）を使用
+""")
+
+        with st.expander("7. ろ過時間推算"):
+            st.markdown(r"""
+#### Ruth のろ過方程式（定圧ろ過）
+
+$$
+t(V) = \frac{\mu \alpha c}{2 A^2 \Delta P} V^2 + \frac{\mu R_m}{A \Delta P} V
+$$
+
+| 記号 | 意味 | 単位 |
+|---|---|---|
+| $t$ | ろ過時間 | s |
+| $V$ | 累積ろ液量 | m³ |
+| $\mu$ | ろ液粘度 | Pa·s |
+| $\alpha$ | ケーク比抵抗 | m/kg |
+| $c$ | スラリー固体濃度（= 乾燥ケーキ質量 / 総ろ液量） | kg/m³ |
+| $A$ | ろ過面積 | m² |
+| $\Delta P$ | 差圧 | Pa |
+| $R_m$ | ろ材抵抗 | m⁻¹ |
+
+---
+
+#### ケーク比抵抗の測定（定流量法）
+
+定流量 $Q$ でのろ過試験から Ruth 式を変形して $\alpha$ を求める：
+
+$$
+\alpha = \frac{A^2 \Delta P}{\mu Q m_{\text{cake}}} - \frac{R_m A}{m_{\text{cake}}}
+$$
+
+---
+
+#### 圧縮性指数
+
+ケーク比抵抗の差圧依存性：
+
+$$
+\alpha = \alpha_0 \cdot \Delta P^n
+$$
+
+両対数変換して線形回帰：
+
+$$
+\ln \alpha = \ln \alpha_0 + n \ln \Delta P
+$$
+
+$n = 0$：非圧縮性ケーク、$n \to 1$：高圧縮性ケーク
+
+---
+
+#### 遠心ろ過（等価差圧）
+
+遠心機の回転数 $N$ [rpm] から等価差圧を算出してから Ruth 式に適用する：
+
+$$
+\Delta P_{\text{eq}} = \frac{\rho \omega^2 (r_{\text{outer}}^2 - r_{\text{inner}}^2)}{2} \quad [\text{Pa}]
+$$
+
+$$
+\omega = \frac{2\pi N}{60} \quad [\text{rad/s}]
+$$
+""")
+
+        with st.expander("8. 密度・単位変換（共通）"):
             st.markdown(r"""
 **水の密度 — Kell (1975) 多項式（g/mL）：**
 

@@ -44,8 +44,8 @@ pg = st.navigation({
         st.Page(_page_heat,      title="伝熱計算"),
         st.Page(_page_filter,    title="ろ過時間推算"),
     ],
-    "ロジック説明": [
-        st.Page(_page_logic,     title="ロジック説明"),
+    "ロジック": [
+        st.Page(_page_logic,     title="ロジック"),
     ],
 })
 pg.run()
