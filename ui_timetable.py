@@ -23,6 +23,7 @@ import streamlit as st
 from timetable.flow_reader import (
     ManufacturingFlow,
     TIME_METHOD_MANUAL,
+    TIME_METHOD_CALC,
     read_flow_excel,
     resolve_schedule,
 )
@@ -545,7 +546,10 @@ def _render_inner():
     st.subheader("③ 工程確認・機器選択・時間調整")
 
     with st.expander("工程ごとの設定", expanded=True):
-        st.caption("計算モジュール未実装の工程は手動入力値が使われます。機器 Tag No. を選択すると伝熱計算・ろ過計算に反映されます。")
+        st.caption(
+            "機器 Tag No. を選択すると伝熱計算・ろ過計算に反映されます。"
+            "「計算」工程は下の計算パラメータ欄に値を入力してください。"
+        )
 
         cols_h = st.columns([1, 3, 2, 2, 2, 3])
         for c, h in zip(cols_h, ["#", "工程名", "操作タイプ", "時間決定", "所要時間(分)", "機器 Tag No."]):
@@ -582,6 +586,114 @@ def _render_inner():
             )
             # 選択結果を equipment_tag に書き戻す
             step.equipment_tag = display_to_tag.get(sel_display)  # "（未選択）" → None
+
+            # ── 計算工程の場合: 計算パラメータを直接入力 ──
+            if step.time_method == TIME_METHOD_CALC and step.op_type in ("HEAT", "COOL"):
+                with st.expander(
+                    f"工程{step.step_no}「{step.name}」 計算パラメータ", expanded=False
+                ):
+                    p1, p2, p3 = st.columns(3)
+                    t0 = p1.number_input(
+                        "初期温度 [°C]",
+                        value=float(step.params.get("初期温度", {}).get("value", 20.0)
+                                    if isinstance(step.params.get("初期温度"), dict)
+                                    else step.params.get("初期温度", 20.0)),
+                        key=f"ht_t0_{step.step_no}",
+                    )
+                    t1 = p2.number_input(
+                        "目標温度 [°C]",
+                        value=float(step.params.get("目標温度", {}).get("value", 80.0)
+                                    if isinstance(step.params.get("目標温度"), dict)
+                                    else step.params.get("目標温度", 80.0)),
+                        key=f"ht_tt_{step.step_no}",
+                    )
+                    vliq = p3.number_input(
+                        "仕込み液量 [L]", min_value=0.1,
+                        value=float(step.params.get("仕込み液量", {}).get("value", 100.0)
+                                    if isinstance(step.params.get("仕込み液量"), dict)
+                                    else step.params.get("仕込み液量", 100.0)),
+                        key=f"ht_vl_{step.step_no}",
+                    )
+                    p4, p5, p6 = st.columns(3)
+                    dens = p4.number_input(
+                        "液密度 [g/mL]", min_value=0.1,
+                        value=float(step.params.get("液密度", {}).get("value", 1.0)
+                                    if isinstance(step.params.get("液密度"), dict)
+                                    else step.params.get("液密度", 1.0)),
+                        key=f"ht_dn_{step.step_no}",
+                    )
+                    cp_v = p5.number_input(
+                        "比熱容量 [J/(g·K)]", min_value=0.1,
+                        value=float(step.params.get("比熱容量", {}).get("value", 2.0)
+                                    if isinstance(step.params.get("比熱容量"), dict)
+                                    else step.params.get("比熱容量", 2.0)),
+                        key=f"ht_cp_{step.step_no}",
+                    )
+                    dT_sign = 1.0 if t1 >= t0 else -1.0
+                    dto = p6.number_input(
+                        "ΔT_offset [K]",
+                        value=float(step.params.get("ΔT_offset", {}).get("value", 20.0 * dT_sign)
+                                    if isinstance(step.params.get("ΔT_offset"), dict)
+                                    else step.params.get("ΔT_offset", 20.0 * dT_sign)),
+                        key=f"ht_dto_{step.step_no}",
+                    )
+                    step.params.update({
+                        "初期温度": t0, "目標温度": t1, "仕込み液量": vliq,
+                        "液密度": dens, "比熱容量": cp_v, "ΔT_offset": dto,
+                    })
+
+            elif step.time_method == TIME_METHOD_CALC and step.op_type == "FILTER":
+                with st.expander(
+                    f"工程{step.step_no}「{step.name}」 計算パラメータ", expanded=False
+                ):
+                    p1, p2, p3 = st.columns(3)
+                    dP = p1.number_input(
+                        "差圧ΔP [MPaG]", min_value=0.001,
+                        value=float(step.params.get("差圧ΔP", {}).get("value", 0.2)
+                                    if isinstance(step.params.get("差圧ΔP"), dict)
+                                    else step.params.get("差圧ΔP", 0.2)),
+                        format="%.3f", key=f"fi_dP_{step.step_no}",
+                    )
+                    mu = p2.number_input(
+                        "ろ液粘度μ [mPa·s]", min_value=0.01,
+                        value=float(step.params.get("ろ液粘度μ", {}).get("value", 1.0)
+                                    if isinstance(step.params.get("ろ液粘度μ"), dict)
+                                    else step.params.get("ろ液粘度μ", 1.0)),
+                        format="%.3f", key=f"fi_mu_{step.step_no}",
+                    )
+                    alpha = p3.number_input(
+                        "ケーク比抵抗α [m/kg]",
+                        value=float(step.params.get("ケーク比抵抗α", {}).get("value", 5e11)
+                                    if isinstance(step.params.get("ケーク比抵抗α"), dict)
+                                    else step.params.get("ケーク比抵抗α", 5e11)),
+                        format="%e", key=f"fi_al_{step.step_no}",
+                    )
+                    p4, p5, p6 = st.columns(3)
+                    Rm = p4.number_input(
+                        "ろ材抵抗Rm [m⁻¹]",
+                        value=float(step.params.get("ろ材抵抗Rm", {}).get("value", 1e10)
+                                    if isinstance(step.params.get("ろ材抵抗Rm"), dict)
+                                    else step.params.get("ろ材抵抗Rm", 1e10)),
+                        format="%e", key=f"fi_rm_{step.step_no}",
+                    )
+                    mc = p5.number_input(
+                        "乾燥ケーキ質量 [g]", min_value=0.0,
+                        value=float(step.params.get("乾燥ケーキ質量", {}).get("value", 1000.0)
+                                    if isinstance(step.params.get("乾燥ケーキ質量"), dict)
+                                    else step.params.get("乾燥ケーキ質量", 1000.0)),
+                        key=f"fi_mc_{step.step_no}",
+                    )
+                    vt = p6.number_input(
+                        "総ろ液量 [L]", min_value=0.1,
+                        value=float(step.params.get("総ろ液量", {}).get("value", 100.0)
+                                    if isinstance(step.params.get("総ろ液量"), dict)
+                                    else step.params.get("総ろ液量", 100.0)),
+                        key=f"fi_vt_{step.step_no}",
+                    )
+                    step.params.update({
+                        "差圧ΔP": dP, "ろ液粘度μ": mu, "ケーク比抵抗α": alpha,
+                        "ろ材抵抗Rm": Rm, "乾燥ケーキ質量": mc, "総ろ液量": vt,
+                    })
 
         # 手動時間の上書きを適用
         for step in flow.steps:

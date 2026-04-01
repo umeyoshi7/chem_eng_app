@@ -83,8 +83,8 @@ class ExcelEquipmentRepository(EquipmentRepository):
     """reactor_db.xlsx を読み込む実装。
 
     シート構成:
-        Reactors : Tag No., U (W/m2K), 容量(L), 直径(m), 鏡形状
-        Filters  : Tag No., 面積(m2),  種別,    備考
+        Reactors : Tag No., U (kJ/m2hK), 容量(L), 直径(m), 鏡形状
+        Filters  : Tag No., 面積(m2),    種別,    備考
     """
 
     def __init__(self, path: Path | str | None = None):
@@ -133,7 +133,7 @@ class ExcelEquipmentRepository(EquipmentRepository):
         r = row.iloc[0]
         return ReactorSpec(
             tag_no=str(r["Tag No."]),
-            U=float(r["U (W/m2K)"]),
+            U=float(r["U (kJ/m2hK)"]) / 3.6,  # kJ/(m²·h·K) → W/(m²·K) for internal calc
             volume_L=float(r["容量(L)"]),
             diameter_m=float(r["直径(m)"]),
             mirror_type=str(r["鏡形状"]),

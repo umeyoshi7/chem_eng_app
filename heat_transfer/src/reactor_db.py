@@ -38,7 +38,7 @@ def get_reactor_spec(tag_no: str, path: Path | None = None) -> ReactorSpec:
     r = row.iloc[0]
     return ReactorSpec(
         tag_no=str(r["Tag No."]),
-        U=float(r["U (W/m2K)"]),
+        U=float(r["U (kJ/m2hK)"]) / 3.6,  # kJ/(m²·h·K) → W/(m²·K) for internal calc
         volume_L=float(r["容量(L)"]),
         diameter_m=float(r["直径(m)"]),
         mirror_type=str(r["鏡形状"]),
