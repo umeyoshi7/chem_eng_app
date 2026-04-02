@@ -231,8 +231,8 @@ def render_lle_tab(tab=None):
                 df = pd.DataFrame(
                     [(L1[0], L1[1], L1[2], L2[0], L2[1], L2[2])
                      for L1, L2 in tie_lines],
-                    columns=[f'L1_Water', f'L1_{s1}', f'L1_{s2}',
-                             f'L2_Water', f'L2_{s1}', f'L2_{s2}'],
+                    columns=['L1_Water', f'L1_{s1}', f'L1_{s2}',
+                             'L2_Water', f'L2_{s1}', f'L2_{s2}'],
                 )
                 n = len(df)
                 if n <= 10:

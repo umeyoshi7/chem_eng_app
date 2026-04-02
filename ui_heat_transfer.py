@@ -15,14 +15,13 @@ for _key in list(sys.modules.keys()):
     if _key == "src" or _key.startswith("src."):
         del sys.modules[_key]
 
-from src.models import ReactorSpec, GeometryResult
-from src.reactor_db import load_reactor_db, get_reactor_spec, list_tag_nos
+from src.models import ReactorSpec
+from src.reactor_db import get_reactor_spec, list_tag_nos
 from src.geometry import calc_geometry
 from src.heat_calc import (
     simulate_inner_control,
     simulate_outer_control,
     simulate_addition,
-    calc_cp_mix,
 )
 from src.plotting import plot_temperature_profile
 

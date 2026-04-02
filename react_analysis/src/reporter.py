@@ -36,7 +36,6 @@ def generate_excel_report(
     bold       = wb.add_format({"bold": True})
     header_fmt = wb.add_format({"bold": True, "bg_color": "#4472C4", "font_color": "white", "border": 1})
     border     = wb.add_format({"border": 1})
-    number4    = wb.add_format({"num_format": "0.0000", "border": 1})
     highlight  = wb.add_format({"bold": True, "bg_color": "#E2EFDA", "border": 1, "num_format": "0.0000"})
 
     fit = result.fit

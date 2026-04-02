@@ -5,14 +5,6 @@ import pandas as pd
 
 from .models import ReactorSpec
 
-# Repository パターンの re-export（バックエンド切り替え時はこちらを使用）
-from .equipment_repo import (  # noqa: F401
-    get_equipment_repo,
-    EquipmentRepository,
-    EquipmentItem,
-    FilterSpec,
-)
-
 _DEFAULT_DB = Path(__file__).parent.parent / "reactor_db.xlsx"
 
 
