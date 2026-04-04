@@ -90,6 +90,62 @@ def _op_badge(op_type: str, label: str) -> str:
     )
 
 
+def _step_no_cell(step_no: int, op_type: str) -> str:
+    """工程番号を操作タイプの背景色付きで表示する HTML を返す。"""
+    color = OP_COLORS.get(op_type, "D5D8DC")
+    return (
+        f'<div style="background:#{color}33;border-left:3px solid #{color};'
+        f'padding:2px 6px;border-radius:3px;font-weight:600;text-align:center;">'
+        f'{step_no}</div>'
+    )
+
+
+def _duration_status_badge(step, display_to_tag: dict) -> str:
+    """所要時間の決定方法・計算状態を色付きバッジで返す。"""
+    from timetable.flow_reader import TIME_METHOD_MANUAL, TIME_METHOD_CALC
+    if step.time_method == TIME_METHOD_MANUAL:
+        return (
+            '<span style="background:#AED6F1;color:#154360;padding:1px 6px;'
+            'border-radius:4px;font-size:0.78em;font-weight:600;">🔵 手動</span>'
+        )
+    # 計算工程
+    needs_eq = step.op_type in _REACTOR_OPS or step.op_type in _FILTER_OPS
+    eq_val = st.session_state.get(f"eq_{step.step_no}", "（未選択）")
+    eq_selected = eq_val and eq_val != "（未選択）"
+    if needs_eq and not eq_selected:
+        return (
+            '<span style="background:#FAD7A0;color:#784212;padding:1px 6px;'
+            'border-radius:4px;font-size:0.78em;font-weight:600;">⚠️ 機器未設定</span>'
+        )
+    dur = step._duration_min
+    if dur is not None and dur > 0:
+        return (
+            '<span style="background:#A9DFBF;color:#1E8449;padding:1px 6px;'
+            'border-radius:4px;font-size:0.78em;font-weight:600;">✅ 計算済</span>'
+        )
+    return (
+        '<span style="background:#F9E79F;color:#7D6608;padding:1px 6px;'
+        'border-radius:4px;font-size:0.78em;font-weight:600;">🔶 計算待ち</span>'
+    )
+
+
+def _check_equipment_warnings(flow: ManufacturingFlow) -> list[str]:
+    """機器選択が必要なのに未選択の工程を収集する。"""
+    msgs = []
+    for step in flow.steps:
+        if step.op_type in _REACTOR_OPS and step.equipment_tag is None:
+            msgs.append(
+                f"工程{step.step_no}「{step.name}」({step.op_label}) "
+                f"— 反応槽（R-xxx）を選択してください"
+            )
+        elif step.op_type in _FILTER_OPS and step.equipment_tag is None:
+            msgs.append(
+                f"工程{step.step_no}「{step.name}」({step.op_label}) "
+                f"— フィルター/遠心機（F-xxx / C-xxx）を選択してください"
+            )
+    return msgs
+
+
 # ---------------------------------------------------------------------------
 # 機器リスト（キャッシュ）
 # ---------------------------------------------------------------------------
@@ -594,17 +650,17 @@ def _render_inner():
         )
 
         cols_h = st.columns([1, 3, 2, 2, 2, 3])
-        for c, h in zip(cols_h, ["#", "工程名", "操作タイプ", "時間決定", "所要時間(分)", "機器 Tag No."]):
+        for c, h in zip(cols_h, ["#", "工程名", "操作タイプ", "状態", "所要時間(分)", "機器 Tag No."]):
             c.markdown(f"**{h}**")
 
         override_vals: dict[int, float | None] = {}
 
         for step in flow.steps:
             c1, c2, c3, c4, c5, c6 = st.columns([1, 3, 2, 2, 2, 3])
-            c1.markdown(f"**{step.step_no}**")
+            c1.markdown(_step_no_cell(step.step_no, step.op_type), unsafe_allow_html=True)
             c2.markdown(step.name)
             c3.markdown(_op_badge(step.op_type, step.op_label), unsafe_allow_html=True)
-            c4.markdown(step.time_method)
+            c4.markdown(_duration_status_badge(step, display_to_tag), unsafe_allow_html=True)
 
             default_val = step.manual_duration_min if step.manual_duration_min is not None else 0.0
             val = c5.number_input(
@@ -631,9 +687,29 @@ def _render_inner():
 
             # ── 計算工程の場合: 計算パラメータを直接入力 ──
             if step.time_method == TIME_METHOD_CALC and step.op_type in ("HEAT", "COOL"):
-                with st.expander(
-                    f"工程{step.step_no}「{step.name}」 計算パラメータ", expanded=False
-                ):
+                # expander ラベルに推算時間をプレビュー表示（session_state の現在値を使用）
+                def _get_p(skey, pkey, default):
+                    v = st.session_state.get(skey)
+                    if v is not None:
+                        return v
+                    raw = step.params.get(pkey, default)
+                    return float(raw.get("value", default) if isinstance(raw, dict) else raw)
+
+                _ht_preview_params = {
+                    "tag_no":   step.equipment_tag,
+                    "初期温度": _get_p(f"ht_t0_{step.step_no}", "初期温度", 20.0),
+                    "目標温度": _get_p(f"ht_tt_{step.step_no}", "目標温度", 80.0),
+                    "仕込み液量": _get_p(f"ht_vl_{step.step_no}", "仕込み液量", 100.0),
+                    "液密度":   _get_p(f"ht_dn_{step.step_no}", "液密度", 1.0),
+                    "比熱容量": _get_p(f"ht_cp_{step.step_no}", "比熱容量", 2.0),
+                    "ΔT_offset": _get_p(f"ht_dto_{step.step_no}", "ΔT_offset", 20.0),
+                }
+                _ht_preview = _calc_heat_duration(_ht_preview_params)
+                if _ht_preview is not None:
+                    _exp_label = f"工程{step.step_no}「{step.name}」 計算パラメータ  ✅ {_ht_preview:.1f} 分"
+                else:
+                    _exp_label = f"工程{step.step_no}「{step.name}」 計算パラメータ  ⚠️ 未計算"
+                with st.expander(_exp_label, expanded=False):
                     p1, p2, p3 = st.columns(3)
                     t0 = p1.number_input(
                         "初期温度 [°C]",
@@ -685,9 +761,29 @@ def _render_inner():
                     })
 
             elif step.time_method == TIME_METHOD_CALC and step.op_type == "FILTER":
-                with st.expander(
-                    f"工程{step.step_no}「{step.name}」 計算パラメータ", expanded=False
-                ):
+                # expander ラベルに推算時間をプレビュー表示
+                def _get_fi(skey, pkey, default):
+                    v = st.session_state.get(skey)
+                    if v is not None:
+                        return v
+                    raw = step.params.get(pkey, default)
+                    return float(raw.get("value", default) if isinstance(raw, dict) else raw)
+
+                _fi_preview_params = {
+                    "差圧ΔP":        _get_fi(f"fi_dP_{step.step_no}",   "差圧ΔP",        0.2),
+                    "ろ液粘度μ":     _get_fi(f"fi_mu_{step.step_no}",   "ろ液粘度μ",     1.0),
+                    "ケーク比抵抗α": _get_fi(f"fi_al_{step.step_no}",   "ケーク比抵抗α", 5e11),
+                    "ろ材抵抗Rm":    _get_fi(f"fi_rm_{step.step_no}",   "ろ材抵抗Rm",    1e10),
+                    "ろ過面積A":     _get_fi(f"fi_area_{step.step_no}", "ろ過面積A",     1.0),
+                    "乾燥ケーキ質量": _get_fi(f"fi_mc_{step.step_no}", "乾燥ケーキ質量", 1000.0),
+                    "総ろ液量":      _get_fi(f"fi_vt_{step.step_no}",   "総ろ液量",      100.0),
+                }
+                _fi_preview = _calc_filtration_duration(_fi_preview_params)
+                if _fi_preview is not None:
+                    _fi_exp_label = f"工程{step.step_no}「{step.name}」 計算パラメータ  ✅ {_fi_preview:.1f} 分"
+                else:
+                    _fi_exp_label = f"工程{step.step_no}「{step.name}」 計算パラメータ  ⚠️ 未計算"
+                with st.expander(_fi_exp_label, expanded=False):
                     p1, p2, p3 = st.columns(3)
                     dP = p1.number_input(
                         "差圧ΔP [MPaG]", min_value=0.001,
@@ -756,16 +852,29 @@ def _render_inner():
 
     # ─ 製造開始時刻 ─
     st.subheader("④ 製造開始時刻")
-    c_start, _ = st.columns([1, 3])
-    with c_start:
-        start_hour = st.number_input(
-            "製造開始時刻 (時)", min_value=0.0, max_value=23.5,
-            value=8.0, step=0.5, format="%.1f",
-        )
+    c_h, c_m, c_disp, _ = st.columns([1, 1, 1, 1])
+    with c_h:
+        _start_h = st.selectbox("時", list(range(24)), index=8, key="tt_start_hour")
+    with c_m:
+        _start_m = st.selectbox("分", [0, 30], index=0, key="tt_start_min",
+                                 format_func=lambda x: f"{x:02d}")
+    start_hour = _start_h + _start_m / 60.0
+    c_disp.markdown(
+        f'<div style="padding-top:28px;font-size:1.2em;font-weight:600;">'
+        f'🕐 {_start_h:02d}:{_start_m:02d}</div>',
+        unsafe_allow_html=True,
+    )
 
     # ─ タイムテーブル生成 ─
     st.divider()
     st.subheader("⑤ タイムテーブル生成")
+
+    # 機器未選択チェック
+    eq_warns = _check_equipment_warnings(flow)
+    if eq_warns:
+        with st.expander(f"⚠️ 機器が未選択の工程があります（{len(eq_warns)} 件）", expanded=True):
+            for w in eq_warns:
+                st.markdown(f"- {w}")
 
     # 計算工程の所要時間を解決
     warnings = resolve_durations(flow)
