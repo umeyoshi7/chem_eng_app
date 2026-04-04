@@ -100,15 +100,13 @@ def _step_no_cell(step_no: int, op_type: str) -> str:
     )
 
 
-def _duration_status_badge(step, display_to_tag: dict) -> str:
+def _duration_status_badge(step) -> str:
     """所要時間の決定方法・計算状態を色付きバッジで返す。"""
-    from timetable.flow_reader import TIME_METHOD_MANUAL, TIME_METHOD_CALC
     if step.time_method == TIME_METHOD_MANUAL:
         return (
             '<span style="background:#AED6F1;color:#154360;padding:1px 6px;'
             'border-radius:4px;font-size:0.78em;font-weight:600;">🔵 手動</span>'
         )
-    # 計算工程
     needs_eq = step.op_type in _REACTOR_OPS or step.op_type in _FILTER_OPS
     eq_val = st.session_state.get(f"eq_{step.step_no}", "（未選択）")
     eq_selected = eq_val and eq_val != "（未選択）"
@@ -117,7 +115,7 @@ def _duration_status_badge(step, display_to_tag: dict) -> str:
             '<span style="background:#FAD7A0;color:#784212;padding:1px 6px;'
             'border-radius:4px;font-size:0.78em;font-weight:600;">⚠️ 機器未設定</span>'
         )
-    dur = step._duration_min
+    dur = step.duration_min
     if dur is not None and dur > 0:
         return (
             '<span style="background:#A9DFBF;color:#1E8449;padding:1px 6px;'
@@ -127,6 +125,21 @@ def _duration_status_badge(step, display_to_tag: dict) -> str:
         '<span style="background:#F9E79F;color:#7D6608;padding:1px 6px;'
         'border-radius:4px;font-size:0.78em;font-weight:600;">🔶 計算待ち</span>'
     )
+
+
+def _get_param_float(step, skey: str, pkey: str, default: float) -> float:
+    """session_state → step.params の順にフロート値を取得する。
+
+    params の値が {"value": ...} 形式の dict の場合も透過的に処理する。
+    """
+    v = st.session_state.get(skey)
+    if v is not None:
+        return float(v)
+    raw = step.params.get(pkey, default)
+    return float(raw.get("value", default) if isinstance(raw, dict) else raw)
+
+
+_HOURS = list(range(24))
 
 
 def _check_equipment_warnings(flow: ManufacturingFlow) -> list[str]:
@@ -660,7 +673,7 @@ def _render_inner():
             c1.markdown(_step_no_cell(step.step_no, step.op_type), unsafe_allow_html=True)
             c2.markdown(step.name)
             c3.markdown(_op_badge(step.op_type, step.op_label), unsafe_allow_html=True)
-            c4.markdown(_duration_status_badge(step, display_to_tag), unsafe_allow_html=True)
+            c4.markdown(_duration_status_badge(step), unsafe_allow_html=True)
 
             default_val = step.manual_duration_min if step.manual_duration_min is not None else 0.0
             val = c5.number_input(
@@ -687,22 +700,14 @@ def _render_inner():
 
             # ── 計算工程の場合: 計算パラメータを直接入力 ──
             if step.time_method == TIME_METHOD_CALC and step.op_type in ("HEAT", "COOL"):
-                # expander ラベルに推算時間をプレビュー表示（session_state の現在値を使用）
-                def _get_p(skey, pkey, default):
-                    v = st.session_state.get(skey)
-                    if v is not None:
-                        return v
-                    raw = step.params.get(pkey, default)
-                    return float(raw.get("value", default) if isinstance(raw, dict) else raw)
-
                 _ht_preview_params = {
-                    "tag_no":   step.equipment_tag,
-                    "初期温度": _get_p(f"ht_t0_{step.step_no}", "初期温度", 20.0),
-                    "目標温度": _get_p(f"ht_tt_{step.step_no}", "目標温度", 80.0),
-                    "仕込み液量": _get_p(f"ht_vl_{step.step_no}", "仕込み液量", 100.0),
-                    "液密度":   _get_p(f"ht_dn_{step.step_no}", "液密度", 1.0),
-                    "比熱容量": _get_p(f"ht_cp_{step.step_no}", "比熱容量", 2.0),
-                    "ΔT_offset": _get_p(f"ht_dto_{step.step_no}", "ΔT_offset", 20.0),
+                    "tag_no":    step.equipment_tag,
+                    "初期温度":  _get_param_float(step, f"ht_t0_{step.step_no}", "初期温度",  20.0),
+                    "目標温度":  _get_param_float(step, f"ht_tt_{step.step_no}", "目標温度",  80.0),
+                    "仕込み液量": _get_param_float(step, f"ht_vl_{step.step_no}", "仕込み液量", 100.0),
+                    "液密度":    _get_param_float(step, f"ht_dn_{step.step_no}", "液密度",    1.0),
+                    "比熱容量":  _get_param_float(step, f"ht_cp_{step.step_no}", "比熱容量",  2.0),
+                    "ΔT_offset": _get_param_float(step, f"ht_dto_{step.step_no}", "ΔT_offset", 20.0),
                 }
                 _ht_preview = _calc_heat_duration(_ht_preview_params)
                 if _ht_preview is not None:
@@ -761,22 +766,14 @@ def _render_inner():
                     })
 
             elif step.time_method == TIME_METHOD_CALC and step.op_type == "FILTER":
-                # expander ラベルに推算時間をプレビュー表示
-                def _get_fi(skey, pkey, default):
-                    v = st.session_state.get(skey)
-                    if v is not None:
-                        return v
-                    raw = step.params.get(pkey, default)
-                    return float(raw.get("value", default) if isinstance(raw, dict) else raw)
-
                 _fi_preview_params = {
-                    "差圧ΔP":        _get_fi(f"fi_dP_{step.step_no}",   "差圧ΔP",        0.2),
-                    "ろ液粘度μ":     _get_fi(f"fi_mu_{step.step_no}",   "ろ液粘度μ",     1.0),
-                    "ケーク比抵抗α": _get_fi(f"fi_al_{step.step_no}",   "ケーク比抵抗α", 5e11),
-                    "ろ材抵抗Rm":    _get_fi(f"fi_rm_{step.step_no}",   "ろ材抵抗Rm",    1e10),
-                    "ろ過面積A":     _get_fi(f"fi_area_{step.step_no}", "ろ過面積A",     1.0),
-                    "乾燥ケーキ質量": _get_fi(f"fi_mc_{step.step_no}", "乾燥ケーキ質量", 1000.0),
-                    "総ろ液量":      _get_fi(f"fi_vt_{step.step_no}",   "総ろ液量",      100.0),
+                    "差圧ΔP":         _get_param_float(step, f"fi_dP_{step.step_no}",   "差圧ΔP",         0.2),
+                    "ろ液粘度μ":      _get_param_float(step, f"fi_mu_{step.step_no}",   "ろ液粘度μ",      1.0),
+                    "ケーク比抵抗α":  _get_param_float(step, f"fi_al_{step.step_no}",   "ケーク比抵抗α",  5e11),
+                    "ろ材抵抗Rm":     _get_param_float(step, f"fi_rm_{step.step_no}",   "ろ材抵抗Rm",     1e10),
+                    "ろ過面積A":      _get_param_float(step, f"fi_area_{step.step_no}", "ろ過面積A",      1.0),
+                    "乾燥ケーキ質量": _get_param_float(step, f"fi_mc_{step.step_no}",   "乾燥ケーキ質量", 1000.0),
+                    "総ろ液量":       _get_param_float(step, f"fi_vt_{step.step_no}",   "総ろ液量",       100.0),
                 }
                 _fi_preview = _calc_filtration_duration(_fi_preview_params)
                 if _fi_preview is not None:
@@ -844,7 +841,7 @@ def _render_inner():
         for step in flow.steps:
             ov = override_vals.get(step.step_no)
             if ov is not None:
-                step._duration_min     = ov
+                step.duration_min        = ov
                 step.manual_duration_min = ov
             # equipment_tag を params["tag_no"] に注入して計算モジュールから参照できるようにする
             if step.equipment_tag:
@@ -854,7 +851,7 @@ def _render_inner():
     st.subheader("④ 製造開始時刻")
     c_h, c_m, c_disp, _ = st.columns([1, 1, 1, 1])
     with c_h:
-        _start_h = st.selectbox("時", list(range(24)), index=8, key="tt_start_hour")
+        _start_h = st.selectbox("時", _HOURS, index=8, key="tt_start_hour")
     with c_m:
         _start_m = st.selectbox("分", [0, 30], index=0, key="tt_start_min",
                                  format_func=lambda x: f"{x:02d}")
