@@ -27,15 +27,17 @@ from timetable.flow_reader import ManufacturingFlow, OPERATION_TYPES, resolve_sc
 
 # ── 操作タイプ別カラーパレット (RGB hex, no '#') ─────────────────────────
 OP_COLORS: dict[str, str] = {
-    "CHARGE":      "AED6F1",  # 水色
-    "HEAT":        "F1948A",  # 赤系
-    "COOL":        "85C1E9",  # 青系
-    "REACTION":    "A9DFBF",  # 緑系
-    "CONCENTRATE": "F9E79F",  # 黄系
-    "FILTER":      "D7BDE2",  # 紫系
-    "TRANSFER":    "FAD7A0",  # オレンジ系
-    "WASH":        "A8D8EA",  # シアン系
-    "OTHER":       "D5D8DC",  # グレー
+    "CHARGE":          "AED6F1",  # 水色
+    "HEAT":            "F1948A",  # 赤系
+    "COOL":            "85C1E9",  # 青系
+    "REACTION":        "A9DFBF",  # 緑系
+    "CONCENTRATE":     "F9E79F",  # 黄系
+    "FILTER":          "D7BDE2",  # 紫系
+    "TRANSFER":        "FAD7A0",  # オレンジ系
+    "WASH":            "A8D8EA",  # シアン系
+    "SEPARATION":      "C39BD3",  # 薄紫
+    "CRYSTALLIZATION": "A9CCE3",  # 薄青緑
+    "OTHER":           "D5D8DC",  # グレー
 }
 
 HEADER_FILL  = PatternFill("solid", fgColor="2C3E50")
@@ -57,6 +59,17 @@ def _minutes_to_hhmm(minutes: float) -> str:
     h = int(minutes) // 60
     m = int(minutes) % 60
     return f"{h:02d}:{m:02d}"
+
+
+def _minutes_to_day_hhmm(total_abs_min: float) -> str:
+    """絶対経過分を Day1/Day2 HH:MM 形式に変換する。24時間を超える場合 Day2+ を表示。"""
+    total = int(total_abs_min)
+    day = total // (24 * 60) + 1
+    hh = (total % (24 * 60)) // 60
+    mm = total % 60
+    if day > 1:
+        return f"Day{day} {hh:02d}:{mm:02d}"
+    return f"{hh:02d}:{mm:02d}"
 
 
 def _set_header(ws, row: int, col: int, value: str, width: float | None = None):
@@ -90,7 +103,7 @@ def _write_timetable_sheet(wb: openpyxl.Workbook, flow: ManufacturingFlow,
     ws.sheet_view.showGridLines = False
 
     # タイトル
-    ws.merge_cells("A1:J1")
+    ws.merge_cells("A1:J1")  # 10 columns
     title_cell = ws["A1"]
     title_cell.value = "バッチ製造タイムテーブル"
     title_cell.font = TITLE_FONT
@@ -99,17 +112,16 @@ def _write_timetable_sheet(wb: openpyxl.Workbook, flow: ManufacturingFlow,
 
     # ヘッダー行
     headers = [
-        ("工程番号",     8),
-        ("工程名",       22),
+        ("操作番号",     8),
+        ("操作名",       22),
         ("機器Tag No.",  12),
         ("操作タイプ",   12),
-        ("前工程",       10),
+        ("前操作番号",   10),
         ("時間決定",     10),
-        ("開始時刻",     10),
-        ("終了時刻",     10),
+        ("開始時刻",     14),
+        ("終了時刻",     14),
         ("所要時間(分)", 12),
         ("所要時間(h)",  12),
-        ("備考",         24),
     ]
     for col_idx, (h, w) in enumerate(headers, start=1):
         _set_header(ws, 2, col_idx, h, w)
@@ -123,8 +135,8 @@ def _write_timetable_sheet(wb: openpyxl.Workbook, flow: ManufacturingFlow,
         end_min   = sch.get("end",   0.0)
         dur_min   = sch.get("duration", 0.0)
 
-        start_real = _minutes_to_hhmm(start_offset + start_min)
-        end_real   = _minutes_to_hhmm(start_offset + end_min)
+        start_real = _minutes_to_day_hhmm(start_offset + start_min)
+        end_real   = _minutes_to_day_hhmm(start_offset + end_min)
         dur_h      = round(dur_min / 60, 2)
 
         fill     = OP_COLORS.get(step.op_type, OP_COLORS["OTHER"])
@@ -141,7 +153,6 @@ def _write_timetable_sheet(wb: openpyxl.Workbook, flow: ManufacturingFlow,
         _set_body(ws, r,  8, end_real,           CENTER, fill)
         _set_body(ws, r,  9, round(dur_min, 1),  CENTER, fill)
         _set_body(ws, r, 10, dur_h,              CENTER, fill)
-        _set_body(ws, r, 11, step.note,          LEFT,   fill)
         ws.row_dimensions[r].height = 18
 
     # 凡例
@@ -286,6 +297,21 @@ def _write_equipment_gantt_sheet(wb: openpyxl.Workbook, flow: ManufacturingFlow,
             top=Side(style="hair"),   bottom=Side(style="hair"),
         )
 
+    # 24h 境界（真夜中）の縦線を追加
+    data_end_row = len(seen_lanes) + 2
+    for i in range(n_cells):
+        abs_min = start_hour * 60 + i * GANTT_CELL_MIN
+        if abs_min > 0 and abs_min % (24 * 60) == 0:
+            col = GANTT_START_COL + i
+            for r in range(2, data_end_row + 1):
+                c = ws.cell(row=r, column=col)
+                c.border = Border(
+                    left=Side(style="medium"),
+                    right=c.border.right,
+                    top=c.border.top,
+                    bottom=c.border.bottom,
+                )
+
     ws.freeze_panes = ws.cell(row=3, column=GANTT_START_COL)
 
 
@@ -322,8 +348,8 @@ def _write_gantt_sheet(wb: openpyxl.Workbook, flow: ManufacturingFlow,
 
     # ヘッダー（固定列）
     for col, label, w in [
-        (COL_STEP, "工程番号", 8),
-        (COL_NAME, "工程名",  22),
+        (COL_STEP, "操作番号", 8),
+        (COL_NAME, "操作名",  22),
         (COL_TYPE, "操作タイプ", 12),
         (COL_DUR,  "所要時間(分)", 12),
     ]:
@@ -394,13 +420,28 @@ def _write_gantt_sheet(wb: openpyxl.Workbook, flow: ManufacturingFlow,
             else:
                 cell.fill = PatternFill("solid", fgColor="F8F9FA")
 
-    # 現在時刻ライン（オプション: 開始時刻の縦線を太く）
+    # 開始時刻縦線（左端強調）
     for r in range(2, len(flow.steps) + 3):
         c = ws.cell(row=r, column=GANTT_START_COL)
         c.border = Border(
             left=Side(style="medium"), right=Side(style="hair"),
             top=Side(style="hair"),   bottom=Side(style="hair"),
         )
+
+    # 24h 境界（真夜中）の縦線を追加
+    data_end_row = len(flow.steps) + 2
+    for i in range(n_cells):
+        abs_min = start_hour * 60 + i * GANTT_CELL_MIN
+        if abs_min > 0 and abs_min % (24 * 60) == 0:
+            col = GANTT_START_COL + i
+            for r in range(2, data_end_row + 1):
+                c = ws.cell(row=r, column=col)
+                c.border = Border(
+                    left=Side(style="medium"),
+                    right=c.border.right,
+                    top=c.border.top,
+                    bottom=c.border.bottom,
+                )
 
     ws.freeze_panes = ws.cell(row=3, column=GANTT_START_COL)
 
