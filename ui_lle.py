@@ -7,7 +7,20 @@ from engine import calc_lle_diagram, calc_layer_composition
 from solvents import MISCIBLE_SOLVENTS, IMMISCIBLE_SOLVENTS, get_solvent_by_name
 
 
+def _init_state() -> None:
+    defaults = {
+        "lle_T_C": 25,
+        "lle_n_grid": 25,
+        "lle_unit": "g",
+        "lle_amt_water": 1.0,
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+
 def render_lle_tab(tab=None):
+    _init_state()
     with (tab if tab is not None else contextlib.nullcontext()):
         _col_hdr, _col_rst = st.columns([9, 1])
         with _col_hdr:

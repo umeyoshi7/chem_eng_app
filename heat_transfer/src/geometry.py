@@ -6,15 +6,14 @@ from .models import ReactorSpec, GeometryResult
 
 def mirror_area(D: float, mirror_type: str) -> float:
     """
-    鏡部の伝熱面積 [m²]（標準近似式）。
-    ED (楕円鏡): A = 0.87 × π × (D/2)²
-    SD (皿形鏡): A = 0.57 × π × (D/2)²
+    鏡部の伝熱面積 [m²]。
+    ED (楕円鏡): A = 0.345 × π × D²
+    SD (皿形鏡): A = 0.31514 × π × D²
     """
-    base = math.pi * (D / 2) ** 2
     if mirror_type == "ED":
-        return 0.87 * base
+        return 0.345 * math.pi * D ** 2
     elif mirror_type == "SD":
-        return 0.57 * base
+        return 0.31514 * math.pi * D ** 2
     else:
         raise ValueError(f"未対応の鏡形状: {mirror_type}")
 
@@ -23,12 +22,12 @@ def mirror_volume(D: float, mirror_type: str) -> float:
     """
     鏡容積 [m³]。
     ED: V = π × D³ / 24
-    SD: V ≈ 0.0847 × D³
+    SD: V = 0.09896 × D³
     """
     if mirror_type == "ED":
         return math.pi * D ** 3 / 24.0
     elif mirror_type == "SD":
-        return 0.0847 * D ** 3
+        return 0.09896 * D ** 3
     else:
         raise ValueError(f"未対応の鏡形状: {mirror_type}")
 

@@ -7,7 +7,20 @@ from engine import calc_rayleigh_distillation, density_water, density_solvent
 from solvents import ALL_SOLVENTS, get_solvent_by_name
 
 
+def _init_state() -> None:
+    defaults = {
+        "conc_n": 2,
+        "conc_unit": "mol",
+        "conc_P": 101.325,
+        "conc_T_ref": 25.0,
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+
 def render_conc_tab(tab=None):
+    _init_state()
     with (tab if tab is not None else contextlib.nullcontext()):
         _col_hdr, _col_rst = st.columns([9, 1])
         with _col_hdr:

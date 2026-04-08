@@ -6,7 +6,17 @@ from engine import calc_vle_xy
 from solvents import ALL_SOLVENTS, get_solvent_by_name
 
 
+def _init_state() -> None:
+    defaults = {
+        "vle_P": 101.325,
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+
 def render_vle_tab(tab=None):
+    _init_state()
     with (tab if tab is not None else contextlib.nullcontext()):
         _col_hdr, _col_rst = st.columns([9, 1])
         with _col_hdr:

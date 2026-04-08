@@ -43,11 +43,25 @@ _SOLVENT_NAMES = [s["name"] for s in ALL_SOLVENTS]
 
 def _init_state() -> None:
     defaults = {
+        # 計算結果キャッシュ
         "ct_rayleigh_result": None,
         "ct_rayleigh_fingerprint": None,
         "ct_rayleigh_solvents": None,
         "ct_time_result": None,
+        # Widget デフォルト（ページ切り替え後も値を保持するために明示的に初期化）
         "ct_conc_src": "手動入力",
+        "ct_n": 2,
+        "ct_unit": "mol",
+        "ct_P": 101.325,
+        "ct_T_ref": 25.0,
+        "ct_input_method": "データベースから選択",
+        "ct_manual_tag": "手動入力",
+        "ct_manual_U": 900.0,
+        "ct_manual_vol": 200.0,
+        "ct_manual_D": 0.70,
+        "ct_manual_mirror": "ED",
+        "ct_T_jacket": 80.0,
+        "ct_target_pct": 80,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -86,6 +100,7 @@ def _calc_concentration_time(
     Q_W_list = []
     jacket_too_cold = False
     hvap_fallback_used = False
+    capacity_overflow = False
 
     for i in range(n - 1):
         T_bp = T_bps[i]
@@ -116,7 +131,8 @@ def _calc_concentration_time(
         try:
             geo = calc_geometry(reactor, V_L)
             A_m2 = geo.A_total
-        except Exception:
+        except ValueError:
+            capacity_overflow = True
             time_min.append(time_min[-1])
             Q_W_list.append(0.0)
             continue
@@ -156,6 +172,7 @@ def _calc_concentration_time(
         "Q_W": Q_W_list,
         "jacket_too_cold": jacket_too_cold,
         "hvap_fallback_used": hvap_fallback_used,
+        "capacity_overflow": capacity_overflow,
     }
 
 
@@ -270,14 +287,8 @@ def render() -> None:
             c2.metric("直径 [m]", f"{reactor_base.diameter_m:.2f}")
             c3.metric("鏡形状", reactor_base.mirror_type)
 
-            U_kJ_h = st.number_input(
-                "U [kJ/(m²·h·K)]", 36.0, 7200.0,
-                float(reactor_base.U * _U_FACTOR),
-                step=36.0, key="ct_U_override",
-                help="実測値で補正する場合に変更",
-            )
             reactor = ReactorSpec(
-                reactor_base.tag_no, U_kJ_h / _U_FACTOR,
+                reactor_base.tag_no, reactor_base.U,
                 reactor_base.volume_L, reactor_base.diameter_m, reactor_base.mirror_type,
             )
 
@@ -391,6 +402,11 @@ def render() -> None:
             )
         if res.get("hvap_fallback_used"):
             st.info("一部成分の蒸発熱が取得できなかったため、40 kJ/mol でフォールバックしました。")
+        if res.get("capacity_overflow"):
+            st.warning(
+                "一部ステップで液量が機器容量を超えたため、そのステップの伝熱計算をスキップしました。"
+                "機器容量または仕込み量を見直してください。"
+            )
 
         # 目標時間の補間
         target_frac = saved_target / 100.0

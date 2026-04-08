@@ -6,7 +6,17 @@ from engine import calc_vapor_pressure_curve
 from solvents import ALL_SOLVENTS, get_solvent_by_name
 
 
+def _init_state() -> None:
+    defaults = {
+        "vp_T_range": (0, 150),
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+
 def render_vp_tab(tab=None):
+    _init_state()
     with (tab if tab is not None else contextlib.nullcontext()):
         _col_hdr, _col_rst = st.columns([9, 1])
         with _col_hdr:

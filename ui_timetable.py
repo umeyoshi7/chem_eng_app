@@ -792,6 +792,11 @@ def _init_timetable_state() -> None:
         "timetable_file_key":  None,   # "filename+size" 文字列
         "timetable_edit_rows": [],     # 編集可能な操作行リスト
         "timetable_result":    None,   # 生成済みタイムテーブルデータ
+        # Widget デフォルト（ページ切り替え後も値を保持するために明示的に初期化）
+        "tt_start_hour": 8,
+        "tt_start_min":  0,
+        # 行widget値のバックアップ（ページ切り替え後の復元用）
+        "_tt_row_state": {},
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -900,6 +905,12 @@ def _render_inner():
             return ["（未選択）"] + filter_display
         else:
             return ["（未選択）"] + reactor_display
+
+    # ─ バックアップからの復元（ページ切り替えでキーがクリアされた場合）─
+    _tt_backup = st.session_state.get("_tt_row_state", {})
+    for _k, _v in _tt_backup.items():
+        if _k not in st.session_state:
+            st.session_state[_k] = _v
 
     # ─ セッション状態キーの初期化（未設定のもののみ）─
     for row in rows:
@@ -1071,6 +1082,21 @@ def _render_inner():
                     p4.number_input("ろ材抵抗Rm [m⁻¹]",                  format="%e",   key=f"fi_rm_{sno}")
                     p5.number_input("乾燥ケーキ質量 [g]", min_value=0.0,                  key=f"fi_mc_{sno}")
                     p6.number_input("総ろ液量 [L]",        min_value=0.1,                  key=f"fi_vt_{sno}")
+
+        # ─ 行widget値をバックアップに保存（ページ切り替え後の復元用）─
+        _row_backup: dict = {}
+        for _row in rows:
+            _sno = _row["step_no"]
+            for _prefix in [
+                "edit_name_", "edit_prev_", "edit_op_", "edit_method_",
+                "dur_", "eq_",
+                "ht_t0_", "ht_tt_", "ht_vl_", "ht_dn_", "ht_cp_", "ht_dto_",
+                "fi_dP_", "fi_mu_", "fi_al_", "fi_rm_", "fi_mc_", "fi_vt_",
+            ]:
+                _key = f"{_prefix}{_sno}"
+                if _key in st.session_state:
+                    _row_backup[_key] = st.session_state[_key]
+        st.session_state["_tt_row_state"] = _row_backup
 
         # 削除処理
         if delete_idx is not None:

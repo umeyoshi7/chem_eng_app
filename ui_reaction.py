@@ -237,6 +237,7 @@ def render(tab=None):
             "反応タイプ",
             rt_labels,
             index=default_idx,
+            key="react_type_sel",
             help=(
                 "自動判定の推奨タイプが選択済みです。\n"
                 + st.session_state.get("detected_reason", "")

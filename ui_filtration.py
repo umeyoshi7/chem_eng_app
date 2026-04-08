@@ -41,9 +41,29 @@ def _fmt_alpha(alpha: float) -> str:
 
 def _init_state() -> None:
     defaults = {
+        # 計算結果キャッシュ
         "fi_cake_results": None,   # list[CakeResistanceResult | None]
         "fi_comp_result": None,    # CompressibilityResult | None
         "fi_time_result": None,    # FiltrationTimeResult | None
+        # Widget デフォルト（ページ切り替え後も値を保持するために明示的に初期化）
+        "fi_mu": 1.0,
+        "fi_A": 0.01,
+        "fi_m_cake": 100.0,
+        "fi_n_rows": 3,
+        "fi_comp_mode": "Tab1 から自動取得",
+        "fi_comp_n": 3,
+        "fi_alpha_src": "Tab1 計算値を使用",
+        "fi_mode": "加圧ろ過",
+        "fi_t3_mu": 1.0,
+        "fi_t3_Rm": 0.0,
+        "fi_t3_A": 0.01,
+        "fi_t3_m_cake": 100.0,
+        "fi_t3_V_total": 10.0,
+        "fi_t3_dP": 0.1,
+        "fi_t3_RPM": 3000.0,
+        "fi_t3_r_in": 0.05,
+        "fi_t3_r_out": 0.15,
+        "fi_t3_rho": 1.0,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
