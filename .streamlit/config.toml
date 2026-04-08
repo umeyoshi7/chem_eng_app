@@ -1,4 +1,10 @@
 [server]
-# Windows で Ctrl+C が効かない問題の回避
-# watchdog (inotify) の代わりに polling を使用することでスレッドが残留しにくくなる
+# ファイル変更監視に polling を使用（inotify の代わり）
 fileWatcherType = "poll"
+# Cloud Run 環境では CORS / XSRF 保護を無効化
+enableCORS = false
+enableXsrfProtection = false
+
+[browser]
+# Cloud Run ではサーバー側でポートを管理するため自動オープンを抑制
+gatherUsageStats = false
