@@ -20,3 +20,7 @@ react_analysis/generate_samples.py
 react_analysis/sample_data
 react_analysis/README.md
 react_analysis/app.py
+.env
+.env.*
+!.env.example
+AI_agent/outputs

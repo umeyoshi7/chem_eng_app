@@ -10,6 +10,7 @@ from ui_reaction import render as render_reaction
 from ui_heat_transfer import render as render_heat_transfer
 from ui_conc_time import render as render_conc_time
 from ui_filtration import render as render_filtration
+from AI_agent.ui import render as render_ai_agent
 
 st.set_page_config(page_title="バッチ製造支援ツール", layout="wide")
 
@@ -29,6 +30,7 @@ def _page_conc_time():    render_conc_time()
 def _page_heat():         render_heat_transfer()
 def _page_filter():       render_filtration()
 def _page_logic():        render_logic_tab()
+def _page_ai_agent():     render_ai_agent()
 
 pg = st.navigation({
     "生産管理": [
@@ -43,6 +45,9 @@ pg = st.navigation({
         st.Page(_page_conc_time, title="濃縮時間推算"),
         st.Page(_page_heat,      title="伝熱計算"),
         st.Page(_page_filter,    title="ろ過時間推算"),
+    ],
+    "AI": [
+        st.Page(_page_ai_agent,  title="AIエージェント"),
     ],
     "": [
         st.Page(_page_logic,     title="ロジック"),

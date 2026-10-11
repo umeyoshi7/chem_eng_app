@@ -12,7 +12,9 @@ from scipy.integrate import solve_ivp
 
 def _ode_simple(t, y, k, n):
     A = max(y[0], 0.0)
-    return [-k * A ** n]
+    # When concentration is 0, rate is 0 regardless of order (avoids 0**0 = 1,
+    # which made zero-order A keep decreasing below 0 after depletion)
+    return [-k * A ** n if A > 0.0 else 0.0]
 
 
 def _ode_sequential(t, y, k1, k2, n1, n2):

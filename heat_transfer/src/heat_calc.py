@@ -160,8 +160,9 @@ def simulate_addition(
                 / (m(t)·Cp_mix(t))
 
     一括添加:
+        混合温度:     T_mix = (m_init·cp_init·T0 + m_reagent·cp_reagent·T_reagent) / (m_total·Cp_mix)
         断熱温度変化: ΔT_adiabatic = Q_rxn·1000 / (m_total·Cp_mix)
-        T0_ode = T0 + ΔT_adiabatic
+        T0_ode = T_mix + ΔT_adiabatic
         ODE: ジャケット冷却のみ（m = m_total, Cp = Cp_mix_final）
     """
     notes: list[str] = []
@@ -171,9 +172,12 @@ def simulate_addition(
     cp_mix_final = calc_cp_mix([cp_initial, cp_reagent], [mass_initial_g, mass_reagent_g])
 
     if addition_mode == "batch":
-        # 断熱温度変化を初期条件として適用
+        # 混合温度（顕熱バランス）+ 反応熱による断熱温度変化を初期条件として適用
+        T_mix = ((mass_initial_g * cp_initial * T0_inner_C
+                  + mass_reagent_g * cp_reagent * T_reagent_C)
+                 / (m_total * cp_mix_final))
         dT_adiabatic = Q_rxn_total_kJ * 1000.0 / (m_total * cp_mix_final)
-        T0_ode = T0_inner_C + dT_adiabatic
+        T0_ode = T_mix + dT_adiabatic
 
         if t_end_s is None or t_end_s <= 0:
             tau_f = tau_seconds(U, A, m_total, cp_mix_final)
@@ -196,6 +200,11 @@ def simulate_addition(
         T_inner = sol.y[0].tolist()
         T_jacket_arr = np.full(len(sol.t), T_jacket_C).tolist()
 
+        if abs(T_mix - T0_inner_C) > 0.1:
+            notes.append(
+                f"添加剤の顕熱による混合温度変化: {T_mix - T0_inner_C:+.1f} °C "
+                f"(添加剤温度 {T_reagent_C:.1f} °C)"
+            )
         if abs(dT_adiabatic) > 0.1:
             notes.append(
                 f"一括添加による断熱温度変化: {dT_adiabatic:+.1f} °C "

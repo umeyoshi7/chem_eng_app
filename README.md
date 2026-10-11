@@ -9,6 +9,53 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+Azure OpenAI の接続情報（AI エージェント・AI パラメータ補完で使用）は環境変数
+`AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_DEPLOYMENT`
+（任意で `AZURE_OPENAI_API_VERSION`）から読み込みます。
+ローカルでは `.env.example` を `.env` にコピーして記入しても構いません（git / Docker イメージには含まれません）。
+
+## Cloud Run へのデプロイ（Secret Manager）
+
+API キーなどは Secret Manager に登録し、Cloud Run がデプロイ時に環境変数としてマウントします
+（アプリ側のコード変更や追加ライブラリは不要）。
+
+```bash
+PROJECT_ID=<プロジェクトID>
+REGION=asia-northeast1
+SERVICE=<Cloud Run サービス名>
+gcloud config set project $PROJECT_ID
+gcloud services enable run.googleapis.com secretmanager.googleapis.com \
+  cloudbuild.googleapis.com artifactregistry.googleapis.com
+
+# 1) シークレット登録（printf を使い末尾に改行を入れない）
+printf '%s' 'https://<resource>.openai.azure.com/' | gcloud secrets create azure-openai-endpoint   --data-file=-
+printf '%s' '<APIキー>'                            | gcloud secrets create azure-openai-api-key    --data-file=-
+printf '%s' 'gpt-4o'                               | gcloud secrets create azure-openai-deployment --data-file=-
+
+# 2) Cloud Run の実行サービスアカウントに読み取り権限を付与
+#    （既定は Compute Engine 既定 SA。専用 SA を使う場合は deploy に --service-account を付ける）
+SA=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')-compute@developer.gserviceaccount.com
+for s in azure-openai-endpoint azure-openai-api-key azure-openai-deployment; do
+  gcloud secrets add-iam-policy-binding $s \
+    --member="serviceAccount:$SA" --role=roles/secretmanager.secretAccessor
+done
+
+# 3) デプロイ（シークレット → 環境変数）
+gcloud run deploy $SERVICE --source . --region $REGION \
+  --update-secrets=AZURE_OPENAI_ENDPOINT=azure-openai-endpoint:latest,AZURE_OPENAI_API_KEY=azure-openai-api-key:latest,AZURE_OPENAI_DEPLOYMENT=azure-openai-deployment:latest \
+  --update-env-vars=AZURE_OPENAI_API_VERSION=2024-10-21 \
+  --session-affinity
+```
+
+- `--update-secrets` は既存サービスの他の設定を残したままシークレットを追加・更新します
+  （`--set-secrets` は既存のシークレット設定をすべて置き換え）
+- `:latest` はインスタンス起動時に解決されます。キーを更新したら
+  `printf '%s' '<新キー>' | gcloud secrets versions add azure-openai-api-key --data-file=-` の後、
+  再デプロイ（新リビジョン作成）で反映されます
+- エンドポイント・デプロイ名は機密でなければ `--update-env-vars` で直接渡しても構いません
+- `--session-affinity`：Streamlit のセッション（チャット履歴など）を同じインスタンスに保つため推奨
+- 末尾の空白・改行はアプリ側でも除去しますが、登録時は `printf '%s'` を推奨します
+
 ---
 
 ## ページ構成
@@ -36,8 +83,9 @@ streamlit run app.py
 - チャット欄から追い指示も可能（例：「操作3 を 45分 に」）
 - 提案は適用前に検証（機器 Tag No. の実在チェック・操作タイプとの整合・数値下限）され、
   不正値は警告表示のうえ無視される
-- **API キー未設定時はモック（デモ）モード**で動作。`.env.example` を `.env` にコピーして
-  Azure OpenAI の接続情報（ENDPOINT / API_KEY / DEPLOYMENT）を記入すると LLM 補完に切り替わる
+- **API キー未設定時はモック（デモ）モード**で動作。Azure OpenAI の接続情報
+  （ENDPOINT / API_KEY / DEPLOYMENT）を環境変数で設定すると LLM 補完に切り替わる
+  （Cloud Run では Secret Manager 経由。「Cloud Run へのデプロイ」参照）
 - テスト：`tests/test_timetable_agent.py`（ユニット）、
   `tests/test_timetable_agent_ui.py`（AppTest による UI 統合テスト）
 
@@ -175,6 +223,15 @@ Ruth のろ過方程式を用いてケーキ比抵抗・圧縮性指数の算出
 
 ---
 
+### AI エージェント
+
+自然言語で質問すると、Azure OpenAI が上記の計算モジュールをツールとして呼び出し、
+計算結果・グラフ・タイムテーブル Excel を返します（数値はすべて既存エンジンで算出）。
+Streamlit の「AI → AIエージェント」ページ、または `python -m AI_agent`（CLI）で利用できます。
+詳細は [AI_agent/README.md](AI_agent/README.md) を参照。
+
+---
+
 ### ロジック説明
 
 計算に使用している数式・アルゴリズムの解説を掲載しています。
@@ -229,7 +286,7 @@ chem_eng_app/
 ├── ui_timetable_agent_panel.py  # AI パラメータ補完パネル（タイムテーブルページに併設）
 ├── ui_logic.py             # ロジック説明ページ
 ├── requirements.txt        # 依存パッケージ
-├── .env.example            # Azure OpenAI 接続設定テンプレート（.env にコピーして使用）
+├── .env.example            # Azure OpenAI 接続設定テンプレート（ローカル用。本番は Secret Manager）
 ├── Dockerfile
 ├── filtration/             # ろ過時間推算モジュール
 │   └── src/
@@ -269,5 +326,6 @@ chem_eng_app/
 │   ├── client.py           # LLM クライアント（Azure OpenAI / モック自動切替）
 │   ├── agent.py            # プロンプト組立・LLM 呼び出し
 │   └── applier.py          # 提案の検証と編集画面への適用
+├── AI_agent/               # 自然言語 AI エージェント（全計算モジュールをツール化、Streamlit / CLI）
 └── tests/                  # timetable_agent のテスト（ユニット / UI 統合）
 ```

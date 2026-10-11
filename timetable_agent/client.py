@@ -170,7 +170,7 @@ class MockLLMClient:
         return AgentReply(
             message=(
                 f"【モックモード】{len(proposals)} 操作のパラメータを定型ルールで補完しました。"
-                "Azure OpenAI の接続情報（.env）を設定すると LLM による補完に切り替わります。"
+                "Azure OpenAI の接続情報（環境変数 / Cloud Run は Secret Manager）を設定すると LLM による補完に切り替わります。"
             ),
             proposals=proposals,
         )

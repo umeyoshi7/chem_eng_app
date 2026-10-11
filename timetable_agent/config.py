@@ -1,6 +1,11 @@
 """Azure OpenAI 接続設定
 
-プロジェクトルートの .env（gitignore 対象）または環境変数から読み込む。
+環境変数から読み込む。
+
+- 本番（Cloud Run）: Secret Manager のシークレットを `gcloud run deploy --set-secrets`
+  で環境変数としてマウントする（README「Cloud Run へのデプロイ」参照）。
+- ローカル開発: プロジェクトルートの .env（gitignore / dockerignore 対象）でも設定できる。
+  既に環境変数がある場合はそちらが優先される。
 
 .env の例:
     AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com/
@@ -49,11 +54,17 @@ class AzureOpenAIConfig:
         return bool(self.endpoint and self.api_key and self.deployment)
 
 
+def _env(key: str, default: str = "") -> str:
+    # Secret Manager に `echo ... | gcloud secrets create` で登録すると末尾に改行が
+    # 入りやすく、そのままだとエンドポイント URL / API キーが不正になるため除去する。
+    return os.environ.get(key, default).strip() or default
+
+
 def load_config() -> AzureOpenAIConfig:
     _load_dotenv()
     return AzureOpenAIConfig(
-        endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT", ""),
-        api_key=os.environ.get("AZURE_OPENAI_API_KEY", ""),
-        deployment=os.environ.get("AZURE_OPENAI_DEPLOYMENT", ""),
-        api_version=os.environ.get("AZURE_OPENAI_API_VERSION", _DEFAULT_API_VERSION),
+        endpoint=_env("AZURE_OPENAI_ENDPOINT"),
+        api_key=_env("AZURE_OPENAI_API_KEY"),
+        deployment=_env("AZURE_OPENAI_DEPLOYMENT"),
+        api_version=_env("AZURE_OPENAI_API_VERSION", _DEFAULT_API_VERSION),
     )

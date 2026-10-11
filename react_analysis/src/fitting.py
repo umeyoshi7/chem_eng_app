@@ -155,7 +155,8 @@ def _compute_ci_from_jacobian(
     """
     try:
         J = res.jac
-        n_params = J.shape[1]
+        # 固定パラメータ（列がすべて 0）は自由度に数えない
+        n_params = max(int(np.count_nonzero(np.any(J != 0, axis=0))), 1)
         dof = max(n_obs - n_params, 1)
         mse = 2.0 * res.cost / max(n_obs, 1)
         JtJ = J.T @ J
@@ -174,6 +175,46 @@ def _compute_ci_from_jacobian(
         return [(np.nan, np.nan)] * len(param_indices)
 
 
+def _least_squares_fixed(residual_fn, x0, bounds, fixed: dict, **kwargs):
+    """least_squares wrapper that holds parameters in ``fixed`` ({index: value}) constant.
+
+    Returned ``res.x`` / ``res.jac`` are expanded back to the full parameter
+    vector (fixed columns of the Jacobian are 0), so downstream code is unchanged.
+    """
+    if not fixed:
+        return least_squares(residual_fn, x0, bounds=bounds, **kwargs)
+    n_all = len(x0)
+    free = [i for i in range(n_all) if i not in fixed]
+
+    def _full(p):
+        x = np.empty(n_all)
+        x[free] = p
+        for i, v in fixed.items():
+            x[i] = v
+        return x
+
+    lb, ub = bounds
+    res = least_squares(
+        lambda p: residual_fn(_full(p)),
+        [x0[i] for i in free],
+        bounds=([lb[i] for i in free], [ub[i] for i in free]),
+        **kwargs,
+    )
+    jac = np.zeros((res.jac.shape[0], n_all))
+    jac[:, free] = res.jac
+    res.x = _full(res.x)
+    res.jac = jac
+    return res
+
+
+def _dedupe_starts(starts: list) -> list:
+    out = []
+    for s in starts:
+        if not any(np.allclose(s, o) for o in out):
+            out.append(s)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Simple reaction fitting (with multistart)
 # ---------------------------------------------------------------------------
@@ -181,6 +222,7 @@ def _compute_ci_from_jacobian(
 def _run_fit_simple_multistart(
     df: pd.DataFrame,
     n_starts: int = 3,
+    fixed_order: float | None = None,
 ) -> tuple[bool, float, float, float, float, float, object | None]:
     """
     Try multiple starting points, return best (by R²) fit result.
@@ -194,15 +236,17 @@ def _run_fit_simple_multistart(
     conc = df.loc[mask_A, "concentration"].to_numpy(dtype=float)
 
     k_heuristic = _estimate_k_simple(time, conc)
-    n_heuristic = _estimate_order_simple(time, conc)
+    n_heuristic = _estimate_order_simple(time, conc) if fixed_order is None else fixed_order
+    n_alt = 1.0 if fixed_order is None else fixed_order
     c0_init = max(float(conc[0]), 1e-9)
+    fixed = {} if fixed_order is None else {1: float(fixed_order)}
 
     # 3 starting points: heuristic, force 1st order, slower reaction
-    starts = [
+    starts = _dedupe_starts([
         (k_heuristic, n_heuristic, c0_init),
-        (k_heuristic, 1.0, c0_init),
+        (k_heuristic, n_alt, c0_init),
         (k_heuristic * 0.1, n_heuristic, c0_init),
-    ]
+    ])
 
     best_r2 = -np.inf
     best_result = None
@@ -222,10 +266,11 @@ def _run_fit_simple_multistart(
 
     for k_s, n_s, c0_s in starts[:n_starts]:
         try:
-            res = least_squares(
+            res = _least_squares_fixed(
                 residual_fn,
                 [k_s, n_s, c0_s],
-                bounds=([1e-9, 0.0, 1e-9], [np.inf, 5.0, np.inf]),
+                ([1e-9, 0.0, 1e-9], [np.inf, 5.0, np.inf]),
+                fixed,
                 method="trf",
                 ftol=1e-8, xtol=1e-8, gtol=1e-8,
                 max_nfev=1000,
@@ -267,8 +312,11 @@ def _run_fit_simple_multistart(
 # Public fitting functions
 # ---------------------------------------------------------------------------
 
-def run_fit_simple(df: pd.DataFrame) -> FitResult:
-    """Fit A→products via RK45 + least_squares with multistart."""
+def run_fit_simple(df: pd.DataFrame, fixed_order: float | None = None) -> FitResult:
+    """Fit A→products via RK45 + least_squares with multistart.
+
+    fixed_order: 指定時は反応次数 n をこの値に固定して k のみ推定する。
+    """
     mask_A = df["concentration"].notna()
     n_valid = int(mask_A.sum())
 
@@ -288,7 +336,8 @@ def run_fit_simple(df: pd.DataFrame) -> FitResult:
     time = df.loc[mask_A, "time"].to_numpy(dtype=float)
     conc = df.loc[mask_A, "concentration"].to_numpy(dtype=float)
 
-    success, k_fit, n_fit, c0_fit, r2, rmse, res_obj = _run_fit_simple_multistart(df)
+    success, k_fit, n_fit, c0_fit, r2, rmse, res_obj = _run_fit_simple_multistart(
+        df, fixed_order=fixed_order)
 
     if not success and np.isnan(k_fit):
         return FitResult(
@@ -328,8 +377,15 @@ def run_fit_simple(df: pd.DataFrame) -> FitResult:
     )
 
 
-def run_fit_sequential(df: pd.DataFrame) -> FitResult:
-    """Fit A→B→C via RK45 + least_squares with n1, n2 estimation (multistart)."""
+def run_fit_sequential(
+    df: pd.DataFrame,
+    fixed_order: float | None = None,
+    fixed_order2: float | None = None,
+) -> FitResult:
+    """Fit A→B→C via RK45 + least_squares with n1, n2 estimation (multistart).
+
+    fixed_order / fixed_order2: 指定時は n1 / n2 をその値に固定する。
+    """
     if "concentration_B" not in df.columns:
         raise ValueError("逐次反応解析には concentration_B 列が必要です。")
 
@@ -364,6 +420,13 @@ def run_fit_sequential(df: pd.DataFrame) -> FitResult:
         n2_init = _estimate_order_simple(time[maskB], concB[maskB])
     else:
         n2_init = 1.0
+    fixed: dict = {}
+    if fixed_order is not None:
+        n1_init = float(fixed_order)
+        fixed[2] = n1_init
+    if fixed_order2 is not None:
+        n2_init = float(fixed_order2)
+        fixed[3] = n2_init
 
     n_res = n_obs
 
@@ -384,11 +447,11 @@ def run_fit_sequential(df: pd.DataFrame) -> FitResult:
             parts.append(sol_y[2][maskC] - concC[maskC])
         return np.concatenate(parts)
 
-    starts = [
+    starts = _dedupe_starts([
         [k1_init, k2_init, n1_init, n2_init],
-        [k1_init, k2_init, 1.0, 1.0],
+        [k1_init, k2_init, fixed.get(2, 1.0), fixed.get(3, 1.0)],
         [k1_init * 0.1, k2_init * 0.1, n1_init, n2_init],
-    ]
+    ])
 
     best_r2 = -np.inf
     res_obj = None
@@ -398,9 +461,10 @@ def run_fit_sequential(df: pd.DataFrame) -> FitResult:
 
     for x0 in starts:
         try:
-            res_t = least_squares(
+            res_t = _least_squares_fixed(
                 residual_fn, x0,
-                bounds=([1e-9, 1e-9, 0.0, 0.0], [np.inf, np.inf, 5.0, 5.0]),
+                ([1e-9, 1e-9, 0.0, 0.0], [np.inf, np.inf, 5.0, 5.0]),
+                fixed,
                 method="trf",
                 ftol=1e-8, xtol=1e-8, gtol=1e-8,
                 max_nfev=2000,
@@ -490,8 +554,11 @@ def run_fit_sequential(df: pd.DataFrame) -> FitResult:
     )
 
 
-def run_fit_parallel(df: pd.DataFrame) -> FitResult:
-    """Fit A→B + A→C via RK45 + least_squares with shared n estimation (multistart)."""
+def run_fit_parallel(df: pd.DataFrame, fixed_order: float | None = None) -> FitResult:
+    """Fit A→B + A→C via RK45 + least_squares with shared n estimation (multistart).
+
+    fixed_order: 指定時は n をその値に固定する。
+    """
     if "concentration_B" not in df.columns:
         raise ValueError("並列反応解析には concentration_B 列が必要です。")
     if "concentration_C" not in df.columns:
@@ -524,6 +591,10 @@ def run_fit_parallel(df: pd.DataFrame) -> FitResult:
         time, concA, concB, concC, maskA, maskB, maskC, k_total
     )
     n_init = _estimate_order_simple(time[maskA], concA[maskA])
+    fixed: dict = {}
+    if fixed_order is not None:
+        n_init = float(fixed_order)
+        fixed[2] = n_init
 
     n_res = n_obs
 
@@ -542,11 +613,11 @@ def run_fit_parallel(df: pd.DataFrame) -> FitResult:
         rC = sol_y[2][maskC] - concC[maskC]
         return np.concatenate([rA, rB, rC])
 
-    starts = [
+    starts = _dedupe_starts([
         [k1_init, k2_init, n_init],
-        [k1_init, k2_init, 1.0],
+        [k1_init, k2_init, fixed.get(2, 1.0)],
         [k1_init * 0.1, k2_init * 0.1, n_init],
-    ]
+    ])
 
     best_r2 = -np.inf
     res_obj = None
@@ -556,9 +627,10 @@ def run_fit_parallel(df: pd.DataFrame) -> FitResult:
 
     for x0 in starts:
         try:
-            res_t = least_squares(
+            res_t = _least_squares_fixed(
                 residual_fn, x0,
-                bounds=([1e-9, 1e-9, 0.0], [np.inf, np.inf, 5.0]),
+                ([1e-9, 1e-9, 0.0], [np.inf, np.inf, 5.0]),
+                fixed,
                 method="trf",
                 ftol=1e-8, xtol=1e-8, gtol=1e-8,
                 max_nfev=2000,
@@ -640,18 +712,27 @@ def run_fit_parallel(df: pd.DataFrame) -> FitResult:
     )
 
 
-def run_fit(df: pd.DataFrame, reaction_type: str) -> FitResult:
-    """Dispatcher: run appropriate fit based on reaction_type."""
+def run_fit(
+    df: pd.DataFrame,
+    reaction_type: str,
+    fixed_order: float | None = None,
+    fixed_order2: float | None = None,
+) -> FitResult:
+    """Dispatcher: run appropriate fit based on reaction_type.
+
+    fixed_order / fixed_order2: 反応次数を固定して k のみ推定する（多温度データの
+    アレニウス解析で、全温度の k を同じ次数＝同じ単位でそろえるために使用）。
+    """
     if reaction_type == "sequential":
         has_B = "concentration_B" in df.columns and df["concentration_B"].notna().any()
         if not has_B:
-            return run_fit_simple(df)
-        return run_fit_sequential(df)
+            return run_fit_simple(df, fixed_order)
+        return run_fit_sequential(df, fixed_order, fixed_order2)
     elif reaction_type == "parallel":
         has_B = "concentration_B" in df.columns and df["concentration_B"].notna().any()
         has_C = "concentration_C" in df.columns and df["concentration_C"].notna().any()
         if not has_B or not has_C:
-            return run_fit_simple(df)
-        return run_fit_parallel(df)
+            return run_fit_simple(df, fixed_order)
+        return run_fit_parallel(df, fixed_order)
     else:
-        return run_fit_simple(df)
+        return run_fit_simple(df, fixed_order)

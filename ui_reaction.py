@@ -603,6 +603,11 @@ def _render_results() -> None:
                 k2_default = fit_sim.k2 if (fit_sim.k2 is not None and np.isfinite(fit_sim.k2)) else None
                 n_default  = fit_sim.order if np.isfinite(fit_sim.order) else 1.0
                 n2_default = fit_sim.order2 if (fit_sim.order2 is not None and np.isfinite(fit_sim.order2)) else 1.0
+                # Arrhenius の k は共通次数で求めているので、次数もそれに合わせる
+                if has_arrhenius and result_sim.optimal_order is not None:
+                    n_default = result_sim.optimal_order
+                    if result_sim.optimal_order2 is not None:
+                        n2_default = result_sim.optimal_order2
 
                 default_cond: dict = {
                     "label":    "条件1",

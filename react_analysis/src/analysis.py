@@ -26,8 +26,9 @@ def run_analysis(
     1. auto_detect_reaction_type(df)
     2. run_fit(df, reaction_type) → FitResult (all data combined)
     3. If multi-temp: run_fit() for each temperature → per_temp_fits
-    4. run_arrhenius() → arrhenius (and arrhenius_k2 if sequential/parallel)
-    5. optimal_order = R²-weighted mean of per_temp_fits[i].order
+    4. optimal_order = R²-weighted mean of per_temp_fits[i].order
+    5. Re-fit each temperature with the order fixed to optimal_order
+       → run_arrhenius() → arrhenius (and arrhenius_k2 if sequential/parallel)
 
     Parameters
     ----------
@@ -68,11 +69,37 @@ def run_analysis(
             except Exception as e:
                 warnings.append(f"{T_c:.1f}°C の解析でエラー: {e}")
 
-    # 4. Arrhenius (use pre-computed per_temp_fits to avoid redundant ODE fitting)
+    # 4. Optimal order (R²-weighted mean over per-temp fits)
+    optimal_order = _weighted_order(per_temp_fits, lambda f: f.order)
+    optimal_order2: Optional[float] = None
+    if reaction_type == "sequential":
+        optimal_order2 = _weighted_order(per_temp_fits, lambda f: f.order2)
+
+    # 5. 共通次数で温度別に再フィット → アレニウス解析
+    #    次数 n が温度ごとに異なると k の単位 ((濃度)^(1-n)/時間) がそろわず、
+    #    ln k vs 1/T の回帰が物理的に意味を持たないため、次数を固定して k を求め直す。
+    per_temp_fits_common: list[tuple[float, FitResult]] = []
+    if is_multi_temp and optimal_order is not None:
+        for T_c, sub_df in temp_groups.items():
+            try:
+                per_temp_fits_common.append(
+                    (T_c, run_fit(sub_df, reaction_type,
+                                  fixed_order=optimal_order, fixed_order2=optimal_order2))
+                )
+            except Exception as e:
+                warnings.append(f"{T_c:.1f}°C の共通次数フィットでエラー: {e}")
+        order_txt = f"n = {optimal_order:.3f}"
+        if optimal_order2 is not None:
+            order_txt += f", n2 = {optimal_order2:.3f}"
+        warnings.append(
+            f"アレニウス解析には共通反応次数（{order_txt}、温度別推定値の R² 加重平均）で"
+            "各温度を再フィットした速度定数を使用しています。"
+        )
+
     arrhenius: Optional[ArrheniusResult] = None
     arrhenius_k2: Optional[ArrheniusResult] = None
     if is_multi_temp:
-        fits_for_arrhenius = per_temp_fits if per_temp_fits else None
+        fits_for_arrhenius = per_temp_fits_common or per_temp_fits or None
         try:
             arrhenius = run_arrhenius(
                 temp_groups, reaction_type, k_index=1,
@@ -94,24 +121,6 @@ def run_analysis(
             except Exception as e:
                 warnings.append(f"アレニウス解析 (k2) でエラー: {e}")
 
-    # 5. Optimal order (R²-weighted mean over per-temp fits)
-    optimal_order: Optional[float] = None
-    if per_temp_fits:
-        valid = [
-            (fit_i.order, fit_i.r2)
-            for _, fit_i in per_temp_fits
-            if fit_i.success and np.isfinite(fit_i.order) and np.isfinite(fit_i.r2)
-        ]
-        if valid:
-            orders, weights = zip(*valid)
-            w = np.array(weights, dtype=float)
-            if w.sum() > 0:
-                optimal_order = float(np.average(orders, weights=w))
-            else:
-                optimal_order = float(np.mean(orders))
-            # Clamp to [0, 5]
-            optimal_order = float(np.clip(optimal_order, 0.0, 5.0))
-
     return AnalysisResult(
         fit=fit,
         reaction_type=reaction_type,
@@ -123,7 +132,24 @@ def run_analysis(
         arrhenius_k2=arrhenius_k2,
         optimal_order=optimal_order,
         warnings=warnings,
+        optimal_order2=optimal_order2,
+        per_temp_fits_common=per_temp_fits_common,
     )
+
+
+def _weighted_order(per_temp_fits: list, getter) -> Optional[float]:
+    """R²-weighted mean of a fitted order over successful per-temp fits, clamped to [0, 5]."""
+    valid = []
+    for _, fit_i in per_temp_fits:
+        v = getter(fit_i)
+        if fit_i.success and v is not None and np.isfinite(v) and np.isfinite(fit_i.r2):
+            valid.append((v, fit_i.r2))
+    if not valid:
+        return None
+    orders, weights = zip(*valid)
+    w = np.clip(np.array(weights, dtype=float), 0.0, None)
+    order = float(np.average(orders, weights=w)) if w.sum() > 0 else float(np.mean(orders))
+    return float(np.clip(order, 0.0, 5.0))
 
 
 def _type_label(t: str) -> str:

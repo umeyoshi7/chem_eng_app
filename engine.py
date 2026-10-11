@@ -1,8 +1,13 @@
 from thermo import ChemicalConstantsPackage, GibbsExcessLiquid, FlashVLN, CEOSGas, PRMIX
 from thermo.unifac import UNIFAC, DOUFSG, DOUFIP2016
+from thermo.nrtl import NRTL
 import streamlit as st
 import concurrent.futures as _cf
 import atexit
+from functools import lru_cache
+
+import numpy as np
+from scipy.optimize import least_squares, minimize
 
 # VF=0 タイムアウト用スレッドプール（LL系で VF=0 が 4s かかる問題を回避）
 _vf0_executor = _cf.ThreadPoolExecutor(max_workers=4)
@@ -59,6 +64,128 @@ def density_water(T_C):
 
 def density_solvent(solvent: dict, T_C: float) -> float:
     return solvent["density_a"] + solvent["density_b"] * T_C
+
+
+# ── 活量係数モデル: UNIFAC Dortmund ＋ THF/水 の NRTL 補正 ────────────────────
+#
+# UNIFAC Dortmund（公開パラメータ DOUFIP2016）は THF/水 を部分混和（約 59 °C 以下で
+# 液液分離）と予測するが、実際の THF/水 は常圧で完全混和し、共沸点は約 64 °C・
+# THF 約 95 wt% にある。そこで THF と水を両方含む系に限り、NRTL を使用する:
+#   - THF/水 ペア : 共沸データ 1 点から NRTL パラメータを決定（「完全混和」を制約条件に追加）
+#   - その他ペア  : UNIFAC Dortmund の活量係数に NRTL を回帰（Aspen の UNIFAC 推算と同じ考え方）
+# THF/水 を含まない系は従来どおり UNIFAC Dortmund のみを使う（結果は変わらない）。
+
+# THF/水 共沸データ（101.325 kPa）。文献代表値（文献により 63.2〜64.0 °C、94〜96 wt% THF）。
+# 値を変更すると次回計算時にパラメータが再決定される。
+THF_WATER_AZEOTROPE = {"T_C": 63.8, "w_THF": 0.946, "P_kPa": 101.325}
+_NRTL_ALPHA = 0.3              # 非ランダム性パラメータ α（水-有機系の標準値）
+_NRTL_STABILITY_MARGIN = 0.02  # 完全混和の制約: d ln(a_THF)/dx_THF ≥ この値（全組成）
+_THF_ID, _WATER_ID = "tetrahydrofuran", "water"
+_MW_THF, _MW_WATER = 72.106, 18.015
+
+
+def _nrtl_binary_lngammas(t12, t21, alpha, x1):
+    """2 成分 NRTL の ln γ1, ln γ2（x1 は配列可）。"""
+    x2 = 1.0 - x1
+    G12, G21 = np.exp(-alpha * t12), np.exp(-alpha * t21)
+    ln1 = x2**2 * (t21 * (G21 / (x1 + x2 * G21))**2 + t12 * G12 / (x2 + x1 * G12)**2)
+    ln2 = x1**2 * (t12 * (G12 / (x2 + x1 * G12))**2 + t21 * G21 / (x1 + x2 * G21)**2)
+    return ln1, ln2
+
+
+@lru_cache(maxsize=None)
+def _thf_water_nrtl_taus(T_az_C: float, w_THF: float, P_kPa: float,
+                         alpha: float = _NRTL_ALPHA,
+                         margin: float = _NRTL_STABILITY_MARGIN) -> tuple:
+    """共沸データ 1 点から THF(1)/水(2) の NRTL τ12, τ21（温度依存なし）を決定する。
+
+    共沸点では x = y なので γi = P / Pi_sat(T_az)。未知数 2・式 2 で解けるが、THF/水 は
+    液液分離の一歩手前の系で、この 2 式だけでは解が液液分離側に入る。そこで
+    「全組成で安定（完全混和）」を制約条件にした最小二乗として解く。
+    """
+    _, corr = ChemicalConstantsPackage.from_IDs([_THF_ID, _WATER_ID])
+    vp_thf, vp_w = corr.VaporPressures
+    T = T_az_C + 273.15
+    P = P_kPa * 1000.0
+    x1 = (w_THF / _MW_THF) / (w_THF / _MW_THF + (1.0 - w_THF) / _MW_WATER)
+    target = np.log([P / vp_thf(T), P / vp_w(T)])
+    xs = np.linspace(0.002, 0.998, 499)
+
+    def obj(p):
+        return float(np.sum((np.array(_nrtl_binary_lngammas(p[0], p[1], alpha, x1)) - target)**2))
+
+    def stability(p):
+        ln_a1 = np.log(xs) + _nrtl_binary_lngammas(p[0], p[1], alpha, xs)[0]
+        return float(np.min(np.diff(ln_a1) / np.diff(xs))) - margin
+
+    best = None
+    for guess in [(1.0, 2.0), (0.5, 2.5), (1.5, 1.5), (2.0, 2.0)]:
+        r = minimize(obj, guess, method="SLSQP",
+                     constraints=[{"type": "ineq", "fun": stability}])
+        if r.success and stability(r.x) >= -1e-6 and (best is None or r.fun < best.fun):
+            best = r
+    if best is None:
+        raise RuntimeError("THF/水 の NRTL パラメータ決定に失敗しました")
+    return float(best.x[0]), float(best.x[1])
+
+
+@lru_cache(maxsize=None)
+def _nrtl_from_unifac(groups_i: tuple, groups_j: tuple, alpha: float = _NRTL_ALPHA) -> tuple:
+    """UNIFAC Dortmund の 2 成分活量係数に NRTL（τ = a + b/T）を回帰する。
+
+    Returns (a_ij, b_ij, a_ji, b_ji)。groups_* は UNIFAC サブグループの (id, 数) タプル。
+    """
+    chemgroups = [dict(groups_i), dict(groups_j)]
+    Ts = [293.15, 323.15, 353.15, 383.15]
+    xs = np.concatenate([[0.001, 0.005, 0.02], np.linspace(0.05, 0.95, 10), [0.98, 0.995, 0.999]])
+    ref = []
+    for T in Ts:
+        ge = UNIFAC.from_subgroups(chemgroups=chemgroups, version=1, T=T, xs=[0.5, 0.5],
+                                   interaction_data=DOUFIP2016, subgroups=DOUFSG)
+        for x in xs:
+            g = ge.to_T_xs(T, [x, 1.0 - x]).gammas()
+            ref.append((T, x, np.log(g[0]), np.log(g[1])))
+    ref = np.array(ref)
+
+    def resid(p):
+        a12, b12, a21, b21 = p
+        t12 = a12 + b12 / ref[:, 0]
+        t21 = a21 + b21 / ref[:, 0]
+        l1, l2 = _nrtl_binary_lngammas(t12, t21, alpha, ref[:, 1])
+        return np.concatenate([l1 - ref[:, 2], l2 - ref[:, 3]])
+
+    r = least_squares(resid, [0.0, 300.0, 0.0, 300.0], method="lm")
+    return tuple(float(v) for v in r.x)
+
+
+def _needs_thf_water_nrtl(thermo_ids) -> bool:
+    return _THF_ID in thermo_ids and _WATER_ID in thermo_ids
+
+
+def _build_ge_model(thermo_ids, chemgroups, T: float, zs: list):
+    """活量係数モデルを生成する。THF と水を両方含む系のみ NRTL、それ以外は UNIFAC Dortmund。"""
+    if not _needs_thf_water_nrtl(thermo_ids):
+        return UNIFAC.from_subgroups(chemgroups=chemgroups, version=1, T=T, xs=zs,
+                                     interaction_data=DOUFIP2016, subgroups=DOUFSG)
+    n = len(thermo_ids)
+    tau_as = [[0.0] * n for _ in range(n)]
+    tau_bs = [[0.0] * n for _ in range(n)]
+    alphas = [[0.0 if i == j else _NRTL_ALPHA for j in range(n)] for i in range(n)]
+    az = THF_WATER_AZEOTROPE
+    t_tw, t_wt = _thf_water_nrtl_taus(az["T_C"], az["w_THF"], az["P_kPa"])
+    for i in range(n):
+        for j in range(i + 1, n):
+            pair = (thermo_ids[i], thermo_ids[j])
+            if pair == (_THF_ID, _WATER_ID):
+                tau_as[i][j], tau_as[j][i] = t_tw, t_wt
+            elif pair == (_WATER_ID, _THF_ID):
+                tau_as[i][j], tau_as[j][i] = t_wt, t_tw
+            else:
+                a_ij, b_ij, a_ji, b_ji = _nrtl_from_unifac(
+                    tuple(sorted(chemgroups[i].items())), tuple(sorted(chemgroups[j].items())))
+                tau_as[i][j], tau_bs[i][j] = a_ij, b_ij
+                tau_as[j][i], tau_bs[j][i] = a_ji, b_ji
+    return NRTL(T=T, xs=zs, tau_as=tau_as, tau_bs=tau_bs, alpha_cs=alphas)
 
 
 @st.cache_resource
@@ -118,13 +245,7 @@ def build_flasher(T: float, thermo_id_1: str, thermo_id_2: str,
         if unifac_override_2:
             new_groups[2] = dict(unifac_override_2)
         constants = constants.with_new_constants(UNIFAC_Dortmund_groups=new_groups)
-    GE = UNIFAC.from_subgroups(
-        chemgroups=constants.UNIFAC_Dortmund_groups,
-        version=1,
-        T=T, xs=[1/3]*3,
-        interaction_data=DOUFIP2016,
-        subgroups=DOUFSG,
-    )
+    GE = _build_ge_model(ids, constants.UNIFAC_Dortmund_groups, T, [1/3]*3)
     vp_list = list(correlations.VaporPressures)
     if vp_offset_1:
         shifted1 = _VaporPressureShifted(vp_list[1], vp_offset_1)
@@ -306,13 +427,7 @@ def build_flasher_general(thermo_ids: tuple, unifac_overrides: tuple = (),
         for idx, items in unifac_overrides:
             new_groups[idx] = dict(items)
         constants = constants.with_new_constants(UNIFAC_Dortmund_groups=new_groups)
-    GE = UNIFAC.from_subgroups(
-        chemgroups=constants.UNIFAC_Dortmund_groups,
-        version=1,
-        T=T0, xs=zs0,
-        interaction_data=DOUFIP2016,
-        subgroups=DOUFSG,
-    )
+    GE = _build_ge_model(thermo_ids, constants.UNIFAC_Dortmund_groups, T0, zs0)
     vp_list = list(correlations.VaporPressures)
     for idx, dT in vp_offsets:
         shifted = _VaporPressureShifted(vp_list[idx], dT)
@@ -628,6 +743,15 @@ def calc_vle_xy(solvents: list, P_kPa: float, n: int = 120):
                 three_phase = None  # T3 ≥ 純成分最低沸点 → 均一共沸の誤検出
 
     if three_phase is not None:
+        # 液液分離の確認: 泡点が平坦なだけの均一系（例: THF/水）を三相域と誤検出しないよう、
+        # プラトー内の組成が T3 直下で実際に 2 液相に分かれるかを確かめる。
+        _xa, _xb = three_phase["x_alpha"], three_phase["x_beta"]
+        _probe_xs = [_xa + (_xb - _xa) * f for f in (0.25, 0.5, 0.75)]
+        _T3_K = three_phase["T3_C"] + 273.15
+        if not any(_is_two_liquid(flasher, P, [x, 1.0 - x], _T3_K) for x in _probe_xs):
+            three_phase = None
+
+    if three_phase is not None:
         T3_C = three_phase["T3_C"]
         T3_K = T3_C + 273.15
 
@@ -650,8 +774,10 @@ def calc_vle_xy(solvents: list, P_kPa: float, n: int = 120):
                 pass
 
         # Step 2: 補完後に x_alpha, x_beta を更新（三相域の両端を再確定）
+        # 三相温度は系の最低沸点（不均一共沸点）なので、T_b < T3 の点はフラッシュが
+        # 液液分離を見逃した準安定解（例: トルエン/水 x=0.95 で 70.7 °C）。実際は三相域内。
         plateau_xs = [x for x, T_b in zip(x1_list, T_b_list)
-                      if T_b is not None and abs(T_b - T3_C) <= 1.0
+                      if T_b is not None and (abs(T_b - T3_C) <= 1.0 or T_b < T3_C - 1.0)
                       and 0.001 < x < 0.999]
         if plateau_xs:
             three_phase["x_alpha"] = min(plateau_xs)
@@ -724,9 +850,16 @@ def calc_vle_xy(solvents: list, P_kPa: float, n: int = 120):
                 x_alpha_f = three_phase["x_alpha"]
                 x_beta_f = three_phase["x_beta"]
                 for idx, x1 in enumerate(x1_list):
-                    if x_alpha_f <= x1 <= x_beta_f and 0.001 < x1 < 0.999:
+                    if not (0.001 < x1 < 0.999):
+                        continue
+                    # 補正後の T3 より低い泡点は準安定解 → 三相域内（Step 2 と同じ考え方）
+                    _tb = T_b_list[idx]
+                    if (x_alpha_f <= x1 <= x_beta_f
+                            or (_tb is not None and _tb < T3_steam_C - 1.0)):
                         T_b_list[idx] = T3_steam_C
                         y1_list[idx] = y3_steam
+                        three_phase["x_alpha"] = min(three_phase["x_alpha"], x1)
+                        three_phase["x_beta"] = max(three_phase["x_beta"], x1)
                 y3 = y3_steam
                 for idx, _y1 in enumerate(y1_list):
                     if _y1 is not None and abs(_y1 - y3) < 0.015:
@@ -737,6 +870,19 @@ def calc_vle_xy(solvents: list, P_kPa: float, n: int = 120):
     return {"x1": x1_list, "y1": y1_list,
             "T_bubble_C": T_b_list, "T_dew_C": T_d_list,
             "three_phase": three_phase}
+
+
+def _is_two_liquid(flasher, P: float, zs: list, T_K: float) -> bool:
+    """泡点直下 (T_K − 0.3 K) で液相が 2 相に分かれるか（不均一系か）を判定する。
+
+    泡点が数ステップ一定でも、均一系の共沸点近傍では温度変化が小さいだけで
+    三相域ではない。三相域キャッシュはこの判定が True の場合のみ使用する。
+    """
+    try:
+        r = flasher.flash(T=T_K - 0.3, P=P, zs=zs)
+        return r.liquid_count >= 2
+    except Exception:
+        return False
 
 
 def calc_rayleigh_distillation(solvents: list, initial_moles: list,
@@ -771,6 +917,7 @@ def calc_rayleigh_distillation(solvents: list, initial_moles: list,
     _T_three_phase_K = None   # 三相温度 (K) 。None = 三相域未確定
     _three_phase_streak = 0   # 連続して同温度だったステップ数
     _THREE_PHASE_CONFIRM = 2  # この回数連続同温度で「三相域確定」とみなす
+    _three_phase_by_steam = False  # 三相域がスチーム蒸留補正で確定したか
 
     # スチーム蒸留 T3 補正の事前計算（2成分系のみ）
     # Σ Psat_i(T3) = P を解いて T3_steam を求め、UNIFAC の過小評価を補正する。
@@ -817,6 +964,9 @@ def calc_rayleigh_distillation(solvents: list, initial_moles: list,
                 (z[i] < 0.02 and _y_cached[i] > 0.05)
                 for i in range(len(solvents))
             )
+            # 液組成が 2 液相域を外れたら（一方の液相が消失）三相域終了
+            if not _depleting and not _three_phase_by_steam:
+                _depleting = not _is_two_liquid(flasher, P, z, _T_three_phase_K)
             if not _depleting:
                 # 三相域のまま → キャッシュ使用
                 T_bp_history.append(_T_three_phase_K - 273.15)
@@ -830,8 +980,10 @@ def calc_rayleigh_distillation(solvents: list, initial_moles: list,
                 _T_three_phase_K = None
                 _y_cached = None
                 _three_phase_streak = 0
+                _three_phase_by_steam = False
 
         res = None
+        _steam_applied = False
         # プローブ失敗時は T_prev を T_lo として使用（探索範囲を狭める）
         _probe_confirmed_below = False
 
@@ -879,6 +1031,17 @@ def calc_rayleigh_distillation(solvents: list, initial_moles: list,
                                           T_lo=t_lo_hint, T_hi=t_hi_hint,
                                           try_vf0=False)
             except Exception:
+                res = None
+            if res is None and (t_lo_hint, t_hi_hint) != (250.0, 450.0):
+                # 一成分が枯渇すると泡点が +25 K を超えて跳ぶ（例: トルエン/水で水が
+                # 無くなると 84 → 110 °C）。狭い探索範囲で見つからなければ全域で再探索。
+                try:
+                    res = _bubble_point_flash(flasher, P, z,
+                                              T_lo=250.0, T_hi=450.0,
+                                              try_vf0=False)
+                except Exception:
+                    res = None
+            if res is None:
                 T_bp_history.append(None)
                 vapor_history.append(None)
                 break
@@ -895,15 +1058,24 @@ def calc_rayleigh_distillation(solvents: list, initial_moles: list,
                 T_bp = _T3_steam_override_K - 273.15
                 y = _y3_steam_override[:]
                 _T_bp_prev_K = _T3_steam_override_K
+                _steam_applied = True
 
-        # 三相域検出: 前ステップと T_bp が 0.05°C 以内で一致したらカウント
+        # 三相域検出: 前ステップと T_bp が 0.1 K 以内で一致し、かつ実際に 2 液相に
+        # 分かれている場合のみ三相域とみなす（均一共沸点近傍の誤検出を防止）。
+        # スチーム蒸留補正が掛かった点は UNIFAC が準安定解を返しているだけで
+        # 不均一系であることは確定している（a_i > 1）ため液相数判定を省略する。
         if _T_three_phase_K is None:
             if len(T_bp_history) > 0 and T_bp_history[-1] is not None:
-                if abs(res.T - (T_bp_history[-1] + 273.15)) < 0.1:
+                if abs((T_bp + 273.15) - (T_bp_history[-1] + 273.15)) < 0.1:
                     _three_phase_streak += 1
                     if _three_phase_streak >= _THREE_PHASE_CONFIRM:
-                        _T_three_phase_K = res.T
-                        _y_cached = y
+                        _T_hp_K = T_bp + 273.15
+                        if _steam_applied or _is_two_liquid(flasher, P, z, _T_hp_K):
+                            _T_three_phase_K = _T_hp_K
+                            _y_cached = y
+                            _three_phase_by_steam = _steam_applied
+                        else:
+                            _three_phase_streak = 0
                 else:
                     _three_phase_streak = 0
             else:

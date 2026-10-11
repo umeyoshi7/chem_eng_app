@@ -137,7 +137,7 @@ def render_agent_panel(rows: list[dict], equipment_items: list) -> None:
                 st.caption("接続先: **Azure OpenAI** — 補完後は③で自由に手修正できます。")
             else:
                 st.caption(
-                    "接続先: **モック（デモ）モード** — .env に Azure OpenAI の接続情報を"
+                    "接続先: **モック（デモ）モード** — Azure OpenAI の接続情報（環境変数 / Secret Manager）を"
                     "設定すると LLM 補完に切り替わります。補完後は③で自由に手修正できます。"
                 )
         with col_btn:

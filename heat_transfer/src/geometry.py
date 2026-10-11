@@ -6,15 +6,17 @@ from .models import ReactorSpec, GeometryResult
 
 def mirror_area(D: float, mirror_type: str) -> float:
     """
-    鏡部の伝熱面積 [m²]（標準近似式）。
-    ED (楕円鏡): A = 0.87 × π × (D/2)²
-    SD (皿形鏡): A = 0.57 × π × (D/2)²
+    鏡部の伝熱面積 [m²]（内表面積）。
+    ED (2:1 半楕円鏡): A = 1.380 × π × (D/2)²  (≈ 1.084 D²、回転楕円体の厳密値)
+    SD (皿形鏡):       A = 1.200 × π × (D/2)²  (≈ 0.943 D²、Rc = D・容積 0.0847 D³ の皿形鏡)
+
+    曲面の面積は投影円の面積 π(D/2)² より必ず大きい（係数 > 1）。
     """
     base = math.pi * (D / 2) ** 2
     if mirror_type == "ED":
-        return 0.87 * base
+        return 1.380 * base
     elif mirror_type == "SD":
-        return 0.57 * base
+        return 1.200 * base
     else:
         raise ValueError(f"未対応の鏡形状: {mirror_type}")
 

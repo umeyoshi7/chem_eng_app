@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
@@ -59,3 +59,7 @@ class AnalysisResult:
     arrhenius_k2: Optional[ArrheniusResult]  # 逐次・並列の k2 用
     optimal_order: Optional[float]
     warnings: list
+    optimal_order2: Optional[float] = None  # 逐次 n2 の R² 加重平均（逐次のみ）
+    # 共通次数 (optimal_order / optimal_order2) に固定して再フィットした温度別結果。
+    # アレニウス解析の k はこちらを使用する（次数が違うと k の単位がそろわないため）。
+    per_temp_fits_common: list = field(default_factory=list)

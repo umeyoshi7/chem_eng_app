@@ -44,6 +44,21 @@ $$
 \Psi_{mn} = \exp\left(-\frac{a_{mn} + b_{mn}T + c_{mn}T^2}{T}\right)
 $$
 
+**THF/水 を含む系の補正（NRTL）：**
+
+UNIFAC Dortmund（公開パラメータ）は THF/水 を部分混和と予測するが、実際は常圧で完全混和
+（共沸点 約 64 °C・THF 約 95 wt%）。THF と水を両方含む系に限り NRTL を使用する：
+
+$$
+\ln \gamma_1 = x_2^2\left[\tau_{21}\left(\frac{G_{21}}{x_1 + x_2 G_{21}}\right)^2 + \frac{\tau_{12} G_{12}}{(x_2 + x_1 G_{12})^2}\right],
+\quad G_{ij} = \exp(-\alpha\,\tau_{ij}),\ \alpha = 0.3
+$$
+
+- THF/水 の $\tau_{12}, \tau_{21}$：共沸点では $x = y$ より $\gamma_i = P / P_i^{sat}(T_{az})$。
+  この 2 式を「全組成で $\partial \ln a_1 / \partial x_1 > 0$（完全混和）」の制約付き最小二乗で解く
+- その他のペア（例：トルエン/水）：UNIFAC Dortmund の活量係数に $\tau_{ij} = a_{ij} + b_{ij}/T$ を回帰
+- THF/水 を含まない系は UNIFAC Dortmund のみ（従来どおり）
+
 ---
 
 #### 液液平衡条件
@@ -270,8 +285,10 @@ $$
 
 | 鏡形状 | 鏡部伝熱面積 | 鏡部容積 |
 |---|---|---|
-| ED（楕円鏡） | $A = 0.87\,\pi (D/2)^2$ | $V = \pi D^3 / 24$ |
-| SD（皿形鏡） | $A = 0.57\,\pi (D/2)^2$ | $V \approx 0.0847\,D^3$ |
+| ED（2:1 半楕円鏡） | $A = 1.380\,\pi (D/2)^2 \approx 1.084\,D^2$ | $V = \pi D^3 / 24$ |
+| SD（皿形鏡） | $A = 1.200\,\pi (D/2)^2 \approx 0.943\,D^2$ | $V \approx 0.0847\,D^3$ |
+
+鏡部のみに液がある場合は、伝熱面積を液量に比例させて近似する（$A = A_{\text{mirror}} \cdot V_{\text{liq}} / V_{\text{mirror}}$）。
 
 胴体部の側面積：$A_{\text{cyl}} = \pi D h_{\text{cyl}}$
 
@@ -321,7 +338,13 @@ $$
 \Delta T_{\text{ad}} = \frac{Q_{\text{rxn}} \times 10^3}{m_{\text{total}} \cdot C_{p,\text{mix}}}
 $$
 
-添加直後の内温 $T_0' = T_0 + \Delta T_{\text{ad}}$ を初期値として、ジャケット冷却の微分方程式を解く：
+試薬温度 $T_{\text{reagent}}$ との混合温度：
+
+$$
+T_{\text{mix}} = \frac{m_0 C_{p,0} T_0 + m_{\text{reagent}} C_{p,\text{reagent}} T_{\text{reagent}}}{m_{\text{total}} \cdot C_{p,\text{mix}}}
+$$
+
+添加直後の内温 $T_0' = T_{\text{mix}} + \Delta T_{\text{ad}}$ を初期値として、ジャケット冷却の微分方程式を解く：
 
 $$
 \frac{dT}{dt} = \frac{U \cdot A \cdot (T_{\text{jacket}} - T)}{m_{\text{total}} \cdot C_{p,\text{mix}}}
