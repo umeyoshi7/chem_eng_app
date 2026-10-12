@@ -76,21 +76,21 @@ turn.tool_calls           # 実行したツールと引数・結果
 
 | ツール | 内容 | 使用する既存モジュール |
 |--------|------|------------------------|
-| `list_solvents` | 対応溶媒 63 成分の一覧 | `solvents.py` |
-| `vapor_pressure` | 蒸気圧・任意圧力での沸点 | `engine.calc_vapor_pressure_curve` |
-| `vle_binary` | 2 成分 VLE・共沸点・三相 | `engine.calc_vle_xy` |
-| `lle_layer_split` | 水＋2 溶媒の層分離組成 | `engine.calc_layer_composition` |
-| `concentration_simulation` | レイリー蒸留（残液組成・沸点推移） | `engine.calc_rayleigh_distillation` |
-| `list_equipment` | 反応槽・フィルター DB | `heat_transfer/src/equipment_repo.py` |
-| `heat_transfer` | 内温制御 / 外温制御 / 添加 | `heat_transfer/src/heat_calc.py` |
-| `concentration_time` | 濃縮所要時間 | `engine` ＋ `ui_conc_time._calc_concentration_time` |
-| `filtration_cake_resistance` | ケーキ比抵抗・圧縮性指数 | `filtration/src/calc.py` |
-| `filtration_time` | 加圧 / 遠心ろ過時間 | `filtration/src/calc.py` |
-| `reaction_analysis` | k・次数・アレニウス解析、Excel レポート | `react_analysis/src/*` |
-| `reaction_simulation` | 濃度プロファイル・転化率到達時間 | `react_analysis/src/simulation.py` |
-| `get_template` | フロー / 実験データの Excel テンプレート | 既存テンプレート |
-| `read_flow_excel` | フロー Excel の読込 | `timetable/flow_reader.py` |
-| `create_timetable` | 時間推算＋タイムテーブル Excel・Gantt | `timetable/*` ＋ 伝熱・ろ過・濃縮時間 |
+| `list_solvents` | 対応溶媒 63 成分の一覧 | `core/solvents.py` |
+| `vapor_pressure` | 蒸気圧・任意圧力での沸点 | `core.thermo_engine.calc_vapor_pressure_curve` |
+| `vle_binary` | 2 成分 VLE・共沸点・三相 | `core.thermo_engine.calc_vle_xy` |
+| `lle_layer_split` | 水＋2 溶媒の層分離組成 | `core.thermo_engine.calc_layer_composition` |
+| `concentration_simulation` | レイリー蒸留（残液組成・沸点推移） | `core.thermo_engine.calc_rayleigh_distillation` |
+| `list_equipment` | 反応槽・フィルター DB | `core/heat_transfer/equipment_repo.py` |
+| `heat_transfer` | 内温制御 / 外温制御 / 添加 | `core/heat_transfer/heat_calc.py` |
+| `concentration_time` | 濃縮所要時間 | `core/concentration_time.py` |
+| `filtration_cake_resistance` | ケーキ比抵抗・圧縮性指数 | `core/filtration/calc.py` |
+| `filtration_time` | 加圧 / 遠心ろ過時間 | `core/filtration/calc.py` |
+| `reaction_analysis` | k・次数・アレニウス解析、Excel レポート | `core/reaction/*` |
+| `reaction_simulation` | 濃度プロファイル・転化率到達時間 | `core/reaction/simulation.py` |
+| `get_template` | フロー / 実験データの Excel テンプレート | `data/templates/` |
+| `read_flow_excel` | フロー Excel の読込 | `core/timetable/flow_reader.py` |
+| `create_timetable` | 時間推算＋タイムテーブル Excel・Gantt | `core/timetable/*` ＋ 伝熱・ろ過・濃縮時間 |
 
 タイムテーブルの所要時間は HEAT/COOL＝伝熱計算、FILTER＝Ruth 式、CONCENTRATE＝濃縮時間推算、
 その他＝指定時間（分）で決まります。HEAT/COOL の初期温度を省略すると直前の昇降温工程の到達温度を引き継ぎ、
@@ -113,14 +113,13 @@ AI_agent/
 │   ├── process.py
 │   ├── reaction.py
 │   └── timetable.py
-├── tests/test_ai_agent.py
 └── outputs/         # CLI の成果物（git 管理外）
 ```
 
 ## テスト
 
 ```bash
-.venv/Scripts/python AI_agent/tests/test_ai_agent.py
+.venv/Scripts/python tests/test_ai_agent.py
 ```
 
 API キー不要。ツールは実際の計算エンジンで検証し、エージェントループと UI は
@@ -130,6 +129,6 @@ OpenAI 互換のフェイククライアントで検証します。
 
 - 気液・液液平衡は UNIFAC Dortmund モデルの予測に従います。ただし THF と水を両方含む系は、
   UNIFAC が誤って液液分離を予測するため、共沸データから決めた NRTL で計算します
-  （`engine.THF_WATER_AZEOTROPE`。共沸点付近の精度は ±1 K 程度、THF 低濃度側は推定精度が下がる）。
+  （`core.thermo_engine.THF_WATER_AZEOTROPE`。共沸点付近の精度は ±1 K 程度、THF 低濃度側は推定精度が下がる）。
 - 濃縮計算が途中で止まった場合は、到達できた蒸発率を回答に示します。
 - 反応速度の時間・濃度単位は入力データの単位に従います。

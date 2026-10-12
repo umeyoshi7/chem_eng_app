@@ -4,16 +4,10 @@ from __future__ import annotations
 
 import math
 import re
-import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Callable
 
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from solvents import ALL_SOLVENTS, IMMISCIBLE_SOLVENTS, MISCIBLE_SOLVENTS  # noqa: E402
+from core.solvents import ALL_SOLVENTS, IMMISCIBLE_SOLVENTS, MISCIBLE_SOLVENTS
 
 
 class ToolError(ValueError):
@@ -183,7 +177,7 @@ def solvent_category(s: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def liquid_density(s: dict, T_C: float) -> float:
-    from engine import density_solvent, density_water
+    from core.thermo_engine import density_solvent, density_water
     return density_water(T_C) if s["name"] == "Water" else density_solvent(s, T_C)
 
 
@@ -231,13 +225,13 @@ def mix_volume_L(sols: list[dict], moles: list[float], T_C: float) -> float:
 # ---------------------------------------------------------------------------
 
 def equipment_repo():
-    from heat_transfer.src.equipment_repo import get_equipment_repo
+    from core.heat_transfer.equipment_repo import get_equipment_repo
     return get_equipment_repo()
 
 
 def get_reactor(tag_no: str | None = None, manual: dict | None = None):
     """Tag No. か手動仕様（U_kJ_m2hK, volume_L, diameter_m, mirror_type）で ReactorSpec を返す。"""
-    from heat_transfer.src.models import ReactorSpec
+    from core.heat_transfer.models import ReactorSpec
     if tag_no:
         try:
             return equipment_repo().get_reactor_spec(str(tag_no).strip())

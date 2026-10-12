@@ -1,1 +1,0 @@
-# reaction kinetics analysis package

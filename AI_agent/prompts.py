@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from solvents import ALL_SOLVENTS
+from core.solvents import ALL_SOLVENTS
 
 _TEMPLATE = """\
 あなたは医薬品・化学品のバッチ製造を支援する化学工学アシスタントです。

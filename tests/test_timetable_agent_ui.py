@@ -30,7 +30,7 @@ def _app():
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    import ui_timetable
+    from ui import timetable as ui_timetable
     ui_timetable.render()
 
 

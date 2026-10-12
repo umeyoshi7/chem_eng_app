@@ -16,15 +16,11 @@ logging.getLogger("streamlit").setLevel(logging.ERROR)
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-import engine  # noqa: E402
-from solvents import ALL_SOLVENTS, get_solvent_by_name  # noqa: E402
-from heat_transfer.src.geometry import calc_geometry, mirror_area  # noqa: E402
-from heat_transfer.src.heat_calc import simulate_addition  # noqa: E402
-from heat_transfer.src.models import ReactorSpec  # noqa: E402
-# react_analysis は `from src.X` 形式のため、パス先頭に追加して src を解決する
-sys.path.insert(0, str(ROOT / "react_analysis"))
-for _k in [k for k in sys.modules if k == "src" or k.startswith("src.")]:
-    del sys.modules[_k]
+from core import thermo_engine as engine  # noqa: E402
+from core.solvents import ALL_SOLVENTS, get_solvent_by_name  # noqa: E402
+from core.heat_transfer.geometry import calc_geometry, mirror_area  # noqa: E402
+from core.heat_transfer.heat_calc import simulate_addition  # noqa: E402
+from core.heat_transfer.models import ReactorSpec  # noqa: E402
 
 
 def _sols(*names):
@@ -107,13 +103,13 @@ def test_batch_addition_uses_reagent_temperature():
 
 
 def test_zero_order_does_not_go_below_zero():
-    from src.ode_systems import _ode_simple
+    from core.reaction.ode_systems import _ode_simple
     assert _ode_simple(0.0, [0.0], 0.05, 0.0) == [0.0]
 
 
 def test_arrhenius_uses_common_order():
     """温度ごとに次数が違う k をそのまま回帰していた（k の単位が不一致）。"""
-    from src.analysis import run_analysis
+    from core.reaction.analysis import run_analysis
     rng = np.random.default_rng(3)
     groups = {}
     for T, k in [(30, 0.02), (45, 0.05), (60, 0.12)]:

@@ -1,15 +1,15 @@
 import streamlit as st
 
-from ui_lle import render_lle_tab
-from ui_vp import render_vp_tab
-from ui_vle import render_vle_tab
-from ui_conc import render_conc_tab
-from ui_logic import render_logic_tab
-from ui_timetable import render as render_timetable
-from ui_reaction import render as render_reaction
-from ui_heat_transfer import render as render_heat_transfer
-from ui_conc_time import render as render_conc_time
-from ui_filtration import render as render_filtration
+from ui.lle import render_lle_tab
+from ui.vp import render_vp_tab
+from ui.vle import render_vle_tab
+from ui.conc import render_conc_tab
+from ui.logic import render_logic_tab
+from ui.timetable import render as render_timetable
+from ui.reaction import render as render_reaction
+from ui.heat_transfer import render as render_heat_transfer
+from ui.conc_time import render as render_conc_time
+from ui.filtration import render as render_filtration
 from AI_agent.ui import render as render_ai_agent
 
 st.set_page_config(page_title="バッチ製造支援ツール", layout="wide")

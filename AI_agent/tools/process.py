@@ -60,8 +60,8 @@ def _liquid_props(solvent: str | None, density, cp, T_C: float) -> tuple[float, 
 def heat_time(reactor, liquid_volume_L: float, density: float, cp: float,
               T0: float, T_target: float, dT_offset: float | None = None):
     """内温制御の昇降温時間計算（タイムテーブルからも利用）。"""
-    from heat_transfer.src.geometry import calc_geometry
-    from heat_transfer.src.heat_calc import simulate_inner_control
+    from core.heat_transfer.geometry import calc_geometry
+    from core.heat_transfer.heat_calc import simulate_inner_control
     if dT_offset is None:
         dT_offset = 20.0 if T_target >= T0 else -20.0
     try:
@@ -106,9 +106,9 @@ def heat_transfer(ws, mode: str, liquid_volume_L: float, initial_temp_C: float,
                   duration_min=None, reagent_mass_g=None, reagent_cp_J_gK=2.0,
                   reagent_temp_C=None, reaction_heat_kJ=0.0, addition_mode="continuous",
                   addition_time_min=None) -> dict:
-    from heat_transfer.src.geometry import calc_geometry
-    from heat_transfer.src.heat_calc import simulate_addition, simulate_outer_control, tau_seconds
-    from heat_transfer.src.plotting import plot_temperature_profile
+    from core.heat_transfer.geometry import calc_geometry
+    from core.heat_transfer.heat_calc import simulate_addition, simulate_outer_control, tau_seconds
+    from core.heat_transfer.plotting import plot_temperature_profile
 
     reactor = get_reactor(reactor_tag, reactor_manual)
     density, cp, prop_note = _liquid_props(solvent, density_g_mL, cp_J_gK, initial_temp_C)
@@ -195,7 +195,7 @@ def heat_transfer(ws, mode: str, liquid_volume_L: float, initial_temp_C: float,
 def concentration_time_core(sols, moles, pressure_kPa, reactor, jacket_temp_C,
                             target_evap_fraction, temperature_ref_C=25.0) -> dict:
     """レイリー蒸留 + 伝熱で濃縮時間を推算する（タイムテーブルからも利用）。"""
-    from ui_conc_time import _calc_concentration_time
+    from core.concentration_time import calc_concentration_time
     from .properties import run_rayleigh
 
     V0 = mix_volume_L(sols, moles, temperature_ref_C)
@@ -205,7 +205,7 @@ def concentration_time_core(sols, moles, pressure_kPa, reactor, jacket_temp_C,
     if not 0 < target_evap_fraction < 1:
         raise ToolError("target_evap_fraction は 0〜1 の範囲で指定してください。")
     ray = run_rayleigh(sols, moles, pressure_kPa, n_steps=50)
-    tres = _calc_concentration_time(ray, sols, reactor, jacket_temp_C)
+    tres = calc_concentration_time(ray, sols, reactor, jacket_temp_C)
     t_target = interp(target_evap_fraction, tres["evap_fraction"], tres["time_min"])
     return {"rayleigh": ray, "time": tres, "V0_L": V0, "t_target_min": t_target}
 
@@ -300,8 +300,8 @@ def _area(area_m2, filter_tag) -> tuple[float, str]:
 def filtration_cake_resistance(ws, measurements: list, viscosity_mPas: float, dry_cake_mass_g: float,
                                area_m2=None, filter_tag=None,
                                medium_resistance_m_inv: float = 1e10) -> dict:
-    from filtration.src.calc import calc_cake_resistance, calc_compressibility
-    from filtration.src.plotting import plot_compressibility
+    from core.filtration.calc import calc_cake_resistance, calc_compressibility
+    from core.filtration.plotting import plot_compressibility
 
     A, a_desc = _area(area_m2, filter_tag)
     rows, dps, alphas = [], [], []
@@ -351,8 +351,8 @@ def filtration_time(ws, mode: str, dry_cake_mass_g: float, filtrate_volume_L: fl
                     pressure_MPa=None, rpm=None, r_inner_m=None, r_outer_m=None, density_g_mL=1.0,
                     viscosity_mPas=1.0, alpha_m_kg=None, alpha0=None, n_compress=None,
                     medium_resistance_m_inv=1e10, area_m2=None, filter_tag=None) -> dict:
-    from filtration.src.calc import calc_filtration_time_centrifuge, calc_filtration_time_pressure
-    from filtration.src.plotting import plot_filtration_curve
+    from core.filtration.calc import calc_filtration_time_centrifuge, calc_filtration_time_pressure
+    from core.filtration.plotting import plot_filtration_curve
 
     A, a_desc = _area(area_m2, filter_tag)
 

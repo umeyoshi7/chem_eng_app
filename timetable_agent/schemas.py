@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 
 class HeatParams(BaseModel):
-    """伝熱計算（HEAT / COOL）用パラメータ。ui_timetable の ht_* キーに対応。"""
+    """伝熱計算（HEAT / COOL）用パラメータ。ui/timetable.py の ht_* キーに対応。"""
     initial_temp_C: float | None = None       # ht_t0_
     target_temp_C: float | None = None        # ht_tt_
     liquid_volume_L: float | None = None      # ht_vl_
@@ -23,7 +23,7 @@ class HeatParams(BaseModel):
 
 
 class FilterParams(BaseModel):
-    """ろ過計算（FILTER）用パラメータ。ui_timetable の fi_* キーに対応。"""
+    """ろ過計算（FILTER）用パラメータ。ui/timetable.py の fi_* キーに対応。"""
     pressure_MPa: float | None = None             # fi_dP_
     viscosity_mPas: float | None = None           # fi_mu_
     cake_resistance_m_per_kg: float | None = None  # fi_al_

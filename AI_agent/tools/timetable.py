@@ -11,11 +11,11 @@ from .common import (
     get_reactor, num, parse_solvent_amounts, r, string, tool,
 )
 
-from timetable.flow_reader import (
+from core.timetable.flow_reader import (
     OPERATION_TYPES, TIME_METHOD_CALC, TIME_METHOD_MANUAL, ManufacturingFlow, ProcessStep,
     read_flow_excel, resolve_schedule,
 )
-from timetable.timetable_writer import OP_COLORS, write_timetable_excel
+from core.timetable.timetable_writer import OP_COLORS, write_timetable_excel
 
 
 @tool(
@@ -65,7 +65,7 @@ def _calc_heat(step: dict, running_temp: float) -> tuple[float, str, float]:
 
 
 def _calc_filter(step: dict) -> tuple[float, str]:
-    from filtration.src.calc import calc_filtration_time_pressure
+    from core.filtration.calc import calc_filtration_time_pressure
     p = step["filter"]
     if step.get("equipment_tag"):
         A, _ = get_filter_area(step["equipment_tag"])

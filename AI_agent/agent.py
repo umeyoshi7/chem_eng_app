@@ -20,7 +20,7 @@ CONFIG_HELP = (
     "  AZURE_OPENAI_DEPLOYMENT=<デプロイ名（function calling 対応モデル, 例: gpt-4o）>\n"
     "  AZURE_OPENAI_API_VERSION=2024-10-21（省略可）\n"
     "\n"
-    "■ Cloud Run: Secret Manager に登録し、gcloud run deploy --set-secrets で\n"
+    "■ Cloud Run: Secret Manager に登録し、gcloud run deploy --update-secrets で\n"
     "  上記の環境変数名にマウントしてください（README「Cloud Run へのデプロイ」参照）。\n"
     "■ ローカル: プロジェクトルートの .env.example を .env にコピーして記入しても可。"
 )

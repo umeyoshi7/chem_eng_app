@@ -11,7 +11,7 @@ from .common import (
     AMOUNT_UNIT, SOLVENT_AMOUNTS, ToolError, interp, num, parse_solvent_amounts,
     r, resolve_solvent, solvent_category, string, tool,
 )
-from solvents import ALL_SOLVENTS
+from core.solvents import ALL_SOLVENTS
 
 
 @tool(
@@ -37,7 +37,7 @@ def list_solvents(ws) -> dict:
 @lru_cache(maxsize=64)
 def _vp_func(thermo_id: str, offset_K: float):
     from thermo import ChemicalConstantsPackage
-    from engine import _VaporPressureShifted
+    from core.thermo_engine import _VaporPressureShifted
     _, props = ChemicalConstantsPackage.from_IDs([thermo_id])
     vp = props.VaporPressures[0]
     return _VaporPressureShifted(vp, offset_K) if offset_K else vp
@@ -78,7 +78,7 @@ def _boiling_point_C(vp, P_kPa: float) -> float | None:
 )
 def vapor_pressure(ws, solvent: str, temperatures_C=None, pressures_kPa=None,
                    T_min_C: float = 0.0, T_max_C: float = 150.0) -> dict:
-    from engine import calc_vapor_pressure_curve
+    from core.thermo_engine import calc_vapor_pressure_curve
 
     s = resolve_solvent(solvent)
     tid = s.get("thermo_surrogate", s["thermo_id"])
@@ -144,7 +144,7 @@ def vapor_pressure(ws, solvent: str, temperatures_C=None, pressures_kPa=None,
 )
 def vle_binary(ws, solvent1: str, solvent2: str, pressure_kPa: float = 101.325,
                x1_query=None) -> dict:
-    from engine import calc_vle_xy
+    from core.thermo_engine import calc_vle_xy
 
     s1, s2 = resolve_solvent(solvent1), resolve_solvent(solvent2)
     if s1 is s2:
@@ -225,7 +225,7 @@ def vle_binary(ws, solvent1: str, solvent2: str, pressure_kPa: float = 101.325,
 )
 def lle_layer_split(ws, water_amount: float, solvent1: str, amount1: float,
                     solvent2: str, amount2: float, unit: str, temperature_C: float = 25.0) -> dict:
-    from engine import calc_layer_composition
+    from core.thermo_engine import calc_layer_composition
 
     s1, s2 = resolve_solvent(solvent1), resolve_solvent(solvent2)
     if "Water" in (s1["name"], s2["name"]) or s1 is s2:
@@ -261,7 +261,7 @@ def lle_layer_split(ws, water_amount: float, solvent1: str, amount1: float,
 # ---------------------------------------------------------------------------
 
 def run_rayleigh(sols: list[dict], moles: list[float], pressure_kPa: float, n_steps: int):
-    from engine import calc_rayleigh_distillation
+    from core.thermo_engine import calc_rayleigh_distillation
     return calc_rayleigh_distillation(sols, moles, pressure_kPa, n_steps=n_steps)
 
 

@@ -1,26 +1,23 @@
+# VCS / 開発環境
 .git
 .gitattributes
 .venv
+.claude
 __pycache__
 *.pyc
 *.pyo
-list.xlsx
-README.md
-.claude
-test_timetable_output.xlsx
-react_analysis/.git
-react_analysis/.venv
-react_analysis/__pycache__
-react_analysis/Dockerfile
-react_analysis/requirements.txt
-react_analysis/.dockerignore
-react_analysis/.gitattributes
-react_analysis/create_template.py
-react_analysis/generate_samples.py
-react_analysis/sample_data
-react_analysis/README.md
-react_analysis/app.py
+
+# 秘密情報（本番は Secret Manager → 環境変数）
 .env
 .env.*
 !.env.example
+
+# 実行時に不要なもの（ドキュメント・テスト・開発用スクリプト・サンプル・生成物）
+README.md
+docs
+tests
+tools
+data/samples
+data/solvent_smiles.xlsx
 AI_agent/outputs
+test_timetable_output.xlsx

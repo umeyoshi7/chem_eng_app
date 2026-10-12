@@ -22,7 +22,7 @@ DEFAULT_OUT = Path(__file__).parent / "outputs"
 
 
 def _quiet_streamlit() -> None:
-    # engine.py の st.cache_resource が Streamlit 外で出す警告を抑制
+    # core/thermo_engine.py の st.cache_resource が Streamlit 外で出す警告を抑制
     for name in ("streamlit", "streamlit.runtime", "streamlit.runtime.caching"):
         logging.getLogger(name).setLevel(logging.ERROR)
 

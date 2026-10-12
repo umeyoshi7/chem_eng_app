@@ -257,7 +257,7 @@ Streamlit の「AI → AIエージェント」ページ、または `python -m A
 
 | 項目 | 内容 |
 |------|------|
-| 活量係数モデル | UNIFAC Dortmund（thermo ライブラリ） |
+| 活量係数モデル | UNIFAC Dortmund（thermo ライブラリ）。THF/水を含む系のみ NRTL（共沸データから決定） |
 | 状態方程式（気相） | Peng-Robinson（PRMIX） |
 | 液相フガシティー | GibbsExcessLiquid（蒸気圧相関式 + 活量係数） |
 | フラッシャー | FlashVLN（多相多成分） |
@@ -272,60 +272,68 @@ Streamlit の「AI → AIエージェント」ページ、または `python -m A
 ```
 chem_eng_app/
 ├── app.py                  # エントリーポイント（ページ設定・ナビゲーション定義）
-├── engine.py               # 計算エンジン（LLE / VLE / レイリー蒸留）
-├── solvents.py             # 溶媒データベース（63成分）
-├── ui_lle.py               # LLE線図ページ
-├── ui_vp.py                # 蒸気圧曲線ページ
-├── ui_vle.py               # VLE線図ページ
-├── ui_conc.py              # 濃縮シミュレーションページ
-├── ui_conc_time.py         # 濃縮時間推算ページ
-├── ui_reaction.py          # 反応速度解析ページ
-├── ui_heat_transfer.py     # 伝熱計算ページ
-├── ui_filtration.py        # ろ過時間推算ページ
-├── ui_timetable.py         # タイムテーブル作成ページ
-├── ui_timetable_agent_panel.py  # AI パラメータ補完パネル（タイムテーブルページに併設）
-├── ui_logic.py             # ロジック説明ページ
-├── requirements.txt        # 依存パッケージ
-├── .env.example            # Azure OpenAI 接続設定テンプレート（ローカル用。本番は Secret Manager）
-├── Dockerfile
-├── filtration/             # ろ過時間推算モジュール
-│   └── src/
-│       ├── calc.py         # ろ過計算（ケーキ比抵抗・圧縮性指数・ろ過時間）
-│       ├── models.py       # データクラス定義
-│       └── plotting.py     # グラフ生成
-├── heat_transfer/          # 伝熱計算モジュール
-│   ├── src/
+├── core/                   # 計算ロジック（Streamlit 画面から独立）
+│   ├── paths.py            # データファイルの場所（一元管理）
+│   ├── solvents.py         # 溶媒データベース（63成分）
+│   ├── thermo_engine.py    # 熱力学計算（LLE / VLE / 蒸気圧 / レイリー蒸留、THF/水 NRTL 補正）
+│   ├── concentration_time.py  # 濃縮時間推算（レイリー蒸留 × 伝熱）
+│   ├── heat_transfer/      # 伝熱計算
 │   │   ├── geometry.py     # 伝熱面積計算
-│   │   ├── heat_calc.py    # 加熱・冷却シミュレーション
+│   │   ├── heat_calc.py    # 内温/外温制御・添加シミュレーション
+│   │   ├── equipment_repo.py  # 反応槽・フィルター DB（リポジトリ）
+│   │   ├── reactor_db.py   # 反応槽 DB 読み込み
 │   │   ├── models.py       # データクラス定義
-│   │   ├── plotting.py     # グラフ生成
-│   │   └── reactor_db.py   # 反応釜データベース読み込み
-│   └── reactor_db.xlsx     # 反応釜マスターデータ
-├── react_analysis/         # 反応速度解析モジュール
-│   ├── src/
+│   │   └── plotting.py     # グラフ生成
+│   ├── filtration/         # ろ過計算（ケーキ比抵抗・圧縮性指数・ろ過時間）
+│   │   ├── calc.py / models.py / plotting.py
+│   ├── reaction/           # 反応速度解析
 │   │   ├── analysis.py     # 解析パイプライン統括
 │   │   ├── arrhenius.py    # アレニウス解析
 │   │   ├── data_loader.py  # データ読み込み・バリデーション
 │   │   ├── fitting.py      # RK4+最小二乗法フィッティング
-│   │   ├── models.py       # データクラス定義
 │   │   ├── ode_systems.py  # ODE 系定義・ソルバー
-│   │   ├── plotting.py     # グラフ生成
+│   │   ├── simulation.py   # シミュレーション実行
 │   │   ├── reporter.py     # Excel レポート出力
-│   │   └── simulation.py   # シミュレーション実行
-│   ├── sample_data/        # サンプルデータ 6種
-│   └── template/
-│       └── experiment_template.xlsx
-├── timetable/              # タイムテーブル生成モジュール
-│   ├── flow_reader.py      # フローシート Excel 読み込み・スケジュール計算
-│   ├── timetable_writer.py # タイムテーブル Excel 出力
-│   └── templates/
-│       └── flow_template.xlsx
+│   │   └── models.py / plotting.py
+│   └── timetable/          # タイムテーブル生成
+│       ├── flow_reader.py  # フローシート Excel 読み込み・スケジュール計算
+│       └── timetable_writer.py  # タイムテーブル Excel 出力
+├── ui/                     # Streamlit 画面（各ページの render 関数）
+│   ├── timetable.py        # タイムテーブル作成
+│   ├── timetable_agent_panel.py  # AI パラメータ補完パネル（タイムテーブルページに併設）
+│   ├── lle.py / vle.py / vp.py / conc.py  # LLE / VLE / 蒸気圧 / 濃縮シミュレーション
+│   ├── conc_time.py / heat_transfer.py / filtration.py / reaction.py
+│   └── logic.py            # ロジック説明
 ├── timetable_agent/        # AI パラメータ補完エージェント
-│   ├── config.py           # Azure OpenAI 接続設定（.env / 環境変数）
+│   ├── config.py           # Azure OpenAI 接続設定（環境変数 / .env）
 │   ├── schemas.py          # LLM 出力の Pydantic スキーマ（差分提案形式）
 │   ├── client.py           # LLM クライアント（Azure OpenAI / モック自動切替）
 │   ├── agent.py            # プロンプト組立・LLM 呼び出し
 │   └── applier.py          # 提案の検証と編集画面への適用
 ├── AI_agent/               # 自然言語 AI エージェント（全計算モジュールをツール化、Streamlit / CLI）
-└── tests/                  # timetable_agent のテスト（ユニット / UI 統合）
+├── data/                   # データファイル
+│   ├── reactor_db.xlsx     # 反応槽・フィルターのマスターデータ
+│   ├── templates/          # 入力テンプレート（製造フロー / 反応速度 実験データ）
+│   ├── samples/reaction/   # 反応速度解析のサンプルデータ 6種
+│   └── solvent_smiles.xlsx # 溶媒名と SMILES の一覧（参考資料）
+├── tools/                  # 開発用スクリプト（テンプレート・サンプル生成）
+├── docs/                   # 詳細ドキュメント（反応速度解析など）
+├── tests/                  # テスト（python tests/<ファイル名>.py で実行）
+├── requirements.txt
+├── .env.example            # Azure OpenAI 接続設定テンプレート（ローカル用。本番は Secret Manager）
+└── Dockerfile
 ```
+
+依存の向き：`app.py` → `ui/` → `core/`（`AI_agent/`・`timetable_agent/` も `core/` を利用）。
+`core/` は Streamlit 画面に依存しないため、計算ロジックの修正・テストは `core/` だけで完結します。
+データファイルのパスは `core/paths.py` で一元管理しています。
+
+### テスト
+
+```bash
+python tests/test_calc_fixes.py          # 計算エンジンの回帰テスト
+python tests/test_ai_agent.py            # AI エージェント
+python tests/test_timetable_agent.py     # AI パラメータ補完（ユニット）
+python tests/test_timetable_agent_ui.py  # AI パラメータ補完（UI 統合）
+```
+

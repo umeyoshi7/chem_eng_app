@@ -1,7 +1,7 @@
 """プロンプト組立と LLM 呼び出し
 
 Streamlit に依存しない純粋なロジック層。
-UI 層（ui_timetable_agent_panel.py）が工程・機器・現在値を dict で渡し、
+UI 層（ui/timetable_agent_panel.py）が工程・機器・現在値を dict で渡し、
 AgentReply を受け取る。
 """
 

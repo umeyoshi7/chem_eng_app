@@ -1,5 +1,7 @@
 __pycache__/
 .venv/
 *.pyc
-test_timetable_output.xlsx
 .env
+test_timetable_output.xlsx
+# Claude Code のローカル設定（個人ごと）
+.claude/settings.local.json

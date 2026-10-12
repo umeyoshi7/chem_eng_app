@@ -3,59 +3,39 @@
 from __future__ import annotations
 
 import io
-import sys
-from functools import lru_cache
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 
-from .common import ROOT, ToolError, num, r, string, tool
+from core.paths import EXPERIMENT_TEMPLATE, FLOW_TEMPLATE
+from core.reaction.analysis import run_analysis
+from core.reaction.data_loader import (
+    auto_detect_reaction_type,
+    get_temperature_groups,
+    load_experiment_data,
+)
+from core.reaction.plotting import plot_arrhenius, plot_fit, plot_simulation_results
+from core.reaction.reporter import generate_excel_report
+from core.reaction.simulation import SimulationCondition, k_from_arrhenius, run_all_simulations
+
+from .common import ToolError, num, r, string, tool
 
 _TYPE_LABEL = {"simple": "単純反応 A→products", "sequential": "逐次反応 A→B→C",
                "parallel": "並列反応 A→B + A→C"}
 
-
-@lru_cache(maxsize=1)
-def _react() -> SimpleNamespace:
-    """react_analysis/src を読み込む。
-
-    react_analysis は "from src.X import Y" 形式のため、ui_reaction.py と同様に
-    sys.path 先頭へ追加し、他モジュールがキャッシュした sys.modules['src'] を退避して import する。
-    """
-    react_dir = str(ROOT / "react_analysis")
-    if react_dir in sys.path:
-        sys.path.remove(react_dir)
-    sys.path.insert(0, react_dir)
-    saved = {k: v for k, v in sys.modules.items() if k == "src" or k.startswith("src.")}
-    for k in saved:
-        del sys.modules[k]
-    try:
-        from src.analysis import run_analysis
-        from src.data_loader import auto_detect_reaction_type, get_temperature_groups, load_experiment_data
-        from src.plotting import plot_arrhenius, plot_fit, plot_simulation_results
-        from src.reporter import generate_excel_report
-        from src.simulation import SimulationCondition, k_from_arrhenius, run_all_simulations
-    finally:
-        # react_analysis の src をキャッシュから外し、他モジュールの src を元に戻す
-        for k in [k for k in sys.modules if k == "src" or k.startswith("src.")]:
-            del sys.modules[k]
-        sys.modules.update(saved)
-        sys.path.remove(react_dir)
-    return SimpleNamespace(
-        run_analysis=run_analysis, auto_detect_reaction_type=auto_detect_reaction_type,
-        get_temperature_groups=get_temperature_groups, load_experiment_data=load_experiment_data,
-        plot_arrhenius=plot_arrhenius, plot_fit=plot_fit, plot_simulation_results=plot_simulation_results,
-        generate_excel_report=generate_excel_report, SimulationCondition=SimulationCondition,
-        k_from_arrhenius=k_from_arrhenius, run_all_simulations=run_all_simulations,
-    )
+# core.reaction の関数をまとめた名前空間（ツール本体からは ra.xxx で参照）
+ra = SimpleNamespace(
+    run_analysis=run_analysis, auto_detect_reaction_type=auto_detect_reaction_type,
+    get_temperature_groups=get_temperature_groups, load_experiment_data=load_experiment_data,
+    plot_arrhenius=plot_arrhenius, plot_fit=plot_fit, plot_simulation_results=plot_simulation_results,
+    generate_excel_report=generate_excel_report, SimulationCondition=SimulationCondition,
+    k_from_arrhenius=k_from_arrhenius, run_all_simulations=run_all_simulations,
+)
 
 
 def _template_path(kind: str) -> Path:
-    return {
-        "flow": ROOT / "timetable" / "templates" / "flow_template.xlsx",
-        "reaction": ROOT / "react_analysis" / "template" / "experiment_template.xlsx",
-    }[kind]
+    return {"flow": FLOW_TEMPLATE, "reaction": EXPERIMENT_TEMPLATE}[kind]
 
 
 @tool(
@@ -84,7 +64,6 @@ def get_template(ws, kind: str) -> dict:
     ["file_name"],
 )
 def reaction_analysis(ws, file_name: str, reaction_type: str = "auto") -> dict:
-    ra = _react()
     data = ws.get_input_file(file_name)
     try:
         df, _, load_warn = ra.load_experiment_data(io.BytesIO(data), file_name)
@@ -161,7 +140,6 @@ def reaction_analysis(ws, file_name: str, reaction_type: str = "auto") -> dict:
 def reaction_simulation(ws, t_end: float, use_last_analysis: bool = False, temperatures_C=None,
                         reaction_type=None, k=None, n=1.0, k2=None, n2=1.0, A0=1.0,
                         target_conversion=None) -> dict:
-    ra = _react()
     conds = []
     if use_last_analysis:
         last = ws.state.get("reaction")

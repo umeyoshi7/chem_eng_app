@@ -1,7 +1,7 @@
 """提案の検証と session_state への適用
 
 LLM の提案（AgentReply.proposals）をホワイトリスト照合・数値検証したうえで、
-ui_timetable.py の編集ウィジェットが読む session_state キーに書き込む。
+ui/timetable.py の編集ウィジェットが読む session_state キーに書き込む。
 
 state は MutableMapping として受け取るため、テストでは plain dict を渡せる。
 検証に落ちた値は書き込まず、警告メッセージとして返す（既存 UI の値が保持される）。
@@ -33,7 +33,7 @@ _FILTER_KEYMAP = {
     "filtrate_volume_L":        "fi_vt_",
 }
 
-# 下限値（ui_timetable.py の number_input の min_value に合わせる。
+# 下限値（ui/timetable.py の number_input の min_value に合わせる。
 # 下回る値を書き込むとウィジェット描画時に例外になるため、ここで弾く）
 _FIELD_MIN = {
     "liquid_volume_L": 0.1, "density_g_per_mL": 0.1, "heat_capacity_J_gK": 0.1,
