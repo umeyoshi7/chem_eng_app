@@ -40,6 +40,37 @@ class _VaporPressureShifted:
         return getattr(self._vp, name)
 
 
+class _VaporPressureAntoine:
+    """thermo DB の蒸気圧相関の適用範囲が狭い成分向けに、Antoine 式で蒸気圧を置き換える。
+    coefs = (A, B, C, Tmin, Tmax): ln P[Pa] = A − B / (T[K] + C)、Tmin/Tmax は回帰に使った温度範囲 (K)。
+    その他の属性は元の相関に委譲する。
+
+    例: TFE は thermo の ANTOINE_WEBBOOK が 272.8–298.6 K 限定で、沸点付近へ外挿すると
+        Tb が約 6 K 高く出るため、WebBook 値＋沸点に再回帰した係数を使う。
+    """
+    def __init__(self, vp_base, coefs: tuple):
+        self._vp = vp_base
+        self._A, self._B, self._C, self.Tmin, self.Tmax = coefs
+
+    def __call__(self, T):
+        return float(np.exp(self._A - self._B / (T + self._C)))
+
+    def T_dependent_property(self, T):
+        return self(T)
+
+    def __getattr__(self, name):
+        return getattr(self._vp, name)
+
+
+def _apply_vp_overrides(vp, T_offset_K: float = 0.0, antoine: tuple = None):
+    """溶媒 dict の vp_antoine / vp_T_offset 指定を蒸気圧相関に適用する。"""
+    if antoine:
+        return _VaporPressureAntoine(vp, antoine)
+    if T_offset_K:
+        return _VaporPressureShifted(vp, T_offset_K)
+    return vp
+
+
 def _flash_vf0_timeout(flasher, P: float, zs: list, timeout: float = 0.35):
     """VF=0 フラッシュをタイムアウト付きで実行する。
     均一系では VF=0 は ~50ms で完了するが、LL 系では ~4s かかって失敗する。
@@ -232,7 +263,8 @@ def calc_hvap_mix_J_mol(thermo_ids: tuple, y: list, T_K: float) -> float:
 def build_flasher(T: float, thermo_id_1: str, thermo_id_2: str,
                   surrogate_1: str = None, surrogate_2: str = None,
                   unifac_override_1: tuple = None, unifac_override_2: tuple = None,
-                  vp_offset_1: float = 0.0, vp_offset_2: float = 0.0):
+                  vp_offset_1: float = 0.0, vp_offset_2: float = 0.0,
+                  vp_antoine_1: tuple = None, vp_antoine_2: tuple = None):
     P = 101325
     ids = ['water',
            surrogate_1 if surrogate_1 else thermo_id_1,
@@ -247,14 +279,11 @@ def build_flasher(T: float, thermo_id_1: str, thermo_id_2: str,
         constants = constants.with_new_constants(UNIFAC_Dortmund_groups=new_groups)
     GE = _build_ge_model(ids, constants.UNIFAC_Dortmund_groups, T, [1/3]*3)
     vp_list = list(correlations.VaporPressures)
-    if vp_offset_1:
-        shifted1 = _VaporPressureShifted(vp_list[1], vp_offset_1)
-        vp_list[1] = shifted1
-        correlations.VaporPressures[1] = shifted1  # FlashVLN 内部の K値推算にも反映
-    if vp_offset_2:
-        shifted2 = _VaporPressureShifted(vp_list[2], vp_offset_2)
-        vp_list[2] = shifted2
-        correlations.VaporPressures[2] = shifted2  # FlashVLN 内部の K値推算にも反映
+    for idx, dT, antoine in ((1, vp_offset_1, vp_antoine_1), (2, vp_offset_2, vp_antoine_2)):
+        if dT or antoine:
+            vp_new = _apply_vp_overrides(vp_list[idx], dT, antoine)
+            vp_list[idx] = vp_new
+            correlations.VaporPressures[idx] = vp_new  # FlashVLN 内部の K値推算にも反映
     liquid = GibbsExcessLiquid(
         VaporPressures=vp_list,
         VolumeLiquids=correlations.VolumeLiquids,
@@ -288,6 +317,8 @@ def calc_lle_diagram(T_C, solvent1: dict, solvent2: dict, n_grid=25):
         unifac_override_2=tuple(sorted(solvent2["unifac_groups"].items())) if "unifac_groups" in solvent2 else None,
         vp_offset_1=solvent1.get("vp_T_offset", 0.0),
         vp_offset_2=solvent2.get("vp_T_offset", 0.0),
+        vp_antoine_1=solvent1.get("vp_antoine"),
+        vp_antoine_2=solvent2.get("vp_antoine"),
     )
 
     tie_lines = []
@@ -361,6 +392,8 @@ def calc_layer_composition(T_C, amounts, unit, solvent1: dict, solvent2: dict):
             unifac_override_2=tuple(sorted(solvent2["unifac_groups"].items())) if "unifac_groups" in solvent2 else None,
             vp_offset_1=solvent1.get("vp_T_offset", 0.0),
             vp_offset_2=solvent2.get("vp_T_offset", 0.0),
+            vp_antoine_1=solvent1.get("vp_antoine"),
+            vp_antoine_2=solvent2.get("vp_antoine"),
         )
         res = flasher.flash(T=T, P=P, zs=z)
     except Exception as e:
@@ -416,7 +449,7 @@ def build_flasher_general(thermo_ids: tuple, unifac_overrides: tuple = (),
 
     thermo_ids: surrogateを適用済みの thermo ID タプル
     unifac_overrides: ((idx, items_tuple), ...) UNIFAC グループ上書き用
-    vp_offsets: ((idx, T_offset_K), ...) 蒸気圧曲線温度シフト用
+    vp_offsets: ((idx, T_offset_K, antoine_coefs or None), ...) 蒸気圧曲線の補正用
     """
     n = len(thermo_ids)
     T0, P0 = 298.15, 101325
@@ -429,10 +462,10 @@ def build_flasher_general(thermo_ids: tuple, unifac_overrides: tuple = (),
         constants = constants.with_new_constants(UNIFAC_Dortmund_groups=new_groups)
     GE = _build_ge_model(thermo_ids, constants.UNIFAC_Dortmund_groups, T0, zs0)
     vp_list = list(correlations.VaporPressures)
-    for idx, dT in vp_offsets:
-        shifted = _VaporPressureShifted(vp_list[idx], dT)
-        vp_list[idx] = shifted
-        correlations.VaporPressures[idx] = shifted  # FlashVLN 内部の K値推算にも反映
+    for idx, dT, antoine in vp_offsets:
+        vp_new = _apply_vp_overrides(vp_list[idx], dT, antoine)
+        vp_list[idx] = vp_new
+        correlations.VaporPressures[idx] = vp_new  # FlashVLN 内部の K値推算にも反映
     liquid = GibbsExcessLiquid(
         VaporPressures=vp_list,
         VolumeLiquids=correlations.VolumeLiquids,
@@ -456,9 +489,9 @@ def _solvents_to_flasher_args(solvents: list):
         if "unifac_groups" in s
     )
     vp_offsets = tuple(
-        (i, s["vp_T_offset"])
+        (i, s.get("vp_T_offset", 0.0), s.get("vp_antoine"))
         for i, s in enumerate(solvents)
-        if s.get("vp_T_offset", 0.0) != 0.0
+        if s.get("vp_T_offset", 0.0) != 0.0 or s.get("vp_antoine")
     )
     return thermo_ids, unifac_overrides, vp_offsets
 
@@ -591,16 +624,17 @@ def _dew_point_flash(flasher, P: float, zs: list,
 
 def calc_vapor_pressure_curve(thermo_id: str, T_min_C: float = 0.0,
                                T_max_C: float = 150.0, n: int = 200,
-                               T_offset_K: float = 0.0):
+                               T_offset_K: float = 0.0, antoine: tuple = None):
     """蒸気圧曲線を計算する。
 
     T_offset_K: サロゲートの沸点ずれを補正するための温度シフト量 (K)
+    antoine: (A, B, C, Tmin, Tmax) 指定時は ln P[Pa] = A − B/(T+C) で蒸気圧を置き換える
     Returns: {"T_C": list, "P_kPa": list, "T_bp_C": float or None,
               "T_valid_min_C": float or None, "T_valid_max_C": float or None}
     """
     _, props = ChemicalConstantsPackage.from_IDs([thermo_id])
     vp_raw = props.VaporPressures[0]
-    vp = _VaporPressureShifted(vp_raw, T_offset_K) if T_offset_K else vp_raw
+    vp = _apply_vp_overrides(vp_raw, T_offset_K, antoine)
     temps = [T_min_C + (T_max_C - T_min_C) * i / (n - 1) for i in range(n)]
     pressures = [vp(t + 273.15) / 1000.0 for t in temps]  # Pa → kPa
 

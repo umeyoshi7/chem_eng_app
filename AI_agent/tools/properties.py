@@ -35,12 +35,11 @@ def list_solvents(ws) -> dict:
 # ---------------------------------------------------------------------------
 
 @lru_cache(maxsize=64)
-def _vp_func(thermo_id: str, offset_K: float):
+def _vp_func(thermo_id: str, offset_K: float, antoine: tuple = None):
     from thermo import ChemicalConstantsPackage
-    from core.thermo_engine import _VaporPressureShifted
+    from core.thermo_engine import _apply_vp_overrides
     _, props = ChemicalConstantsPackage.from_IDs([thermo_id])
-    vp = props.VaporPressures[0]
-    return _VaporPressureShifted(vp, offset_K) if offset_K else vp
+    return _apply_vp_overrides(props.VaporPressures[0], offset_K, antoine)
 
 
 def _boiling_point_C(vp, P_kPa: float) -> float | None:
@@ -83,7 +82,8 @@ def vapor_pressure(ws, solvent: str, temperatures_C=None, pressures_kPa=None,
     s = resolve_solvent(solvent)
     tid = s.get("thermo_surrogate", s["thermo_id"])
     offset = s.get("vp_T_offset", 0.0)
-    vp = _vp_func(tid, offset)
+    antoine = s.get("vp_antoine")
+    vp = _vp_func(tid, offset, antoine)
 
     temps = list(temperatures_C or [])
     press = list(pressures_kPa or [])
@@ -94,7 +94,7 @@ def vapor_pressure(ws, solvent: str, temperatures_C=None, pressures_kPa=None,
         T_min_C = min(T_min_C, min(span) - 10)
         T_max_C = max(T_max_C, max(span) + 10)
 
-    curve = calc_vapor_pressure_curve(tid, T_min_C, T_max_C, T_offset_K=offset)
+    curve = calc_vapor_pressure_curve(tid, T_min_C, T_max_C, T_offset_K=offset, antoine=antoine)
 
     out: dict = {
         "solvent": s["name"],
