@@ -24,11 +24,12 @@ def render_vp_tab(tab=None):
             vp_sol = get_solvent_by_name(vp_name, ALL_SOLVENTS)
             vp_tid = vp_sol.get("thermo_surrogate", vp_sol["thermo_id"])
             vp_offset = vp_sol.get("vp_T_offset", 0.0)
+            vp_antoine = vp_sol.get("vp_antoine")
 
         with st.spinner("計算中..."):
             try:
                 vp_data = calc_vapor_pressure_curve(vp_tid, vp_T_range[0], vp_T_range[1],
-                                                    T_offset_K=vp_offset)
+                                                    T_offset_K=vp_offset, antoine=vp_antoine)
             except Exception as e:
                 vp_data = None
                 with col_vp2:

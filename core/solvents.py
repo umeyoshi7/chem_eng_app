@@ -31,6 +31,13 @@ MISCIBLE_SOLVENTS = [
     # Tb=225°C(thermo), 誘電率≒DMF(37.6), 双極子≒NMP(4.09D) の物性は thermo DB から正確に取得。
     {"name": "1,3-Dimethylimidazolidin-2-One", "thermo_id": "1,3-dimethyl-2-imidazolidinone", "mw": 114.145, "density_a": 1.0726, "density_b": -0.000750, "cp": 1.76,
      "unifac_groups": {34: 1, 78: 2, 86: 1}},   # NMP型近似: CH3N(34)+CY-CH2(78)×2+NMP(86)
+    # TFE: thermo は {CH2:1, OH(P):1, CF3:1} を割り当てるが、DOUFIP2016 に CF3(主群40) と
+    # OH・H2O・ケトン等との相互作用パラメータが無く 0 扱いになるため、CF3→CH3 のエタノール型で近似。
+    # 蒸気圧: thermo の ANTOINE_WEBBOOK は 272.8–298.6 K 限定で外挿すると Tb≒79.6°C と高く出るため、
+    # WebBook 値(0–25°C)＋Tb=73.8°C に再回帰した Antoine 式 ln P[Pa] = A − B/(T[K]+C) で置換。
+    {"name": "2,2,2-Trifluoroethanol",         "thermo_id": "2,2,2-trifluoroethanol",         "mw": 100.040, "density_a": 1.4190, "density_b": -0.001750, "cp": 1.78,
+     "unifac_groups": {1: 1, 2: 1, 14: 1},      # エタノール型近似: CH3(1)+CH2(2)+OH(P)(14)
+     "vp_antoine": (22.8731, 3205.10, -64.491, 272.8, 353.15)},   # (A, B, C, Tmin, Tmax[K])
 ]
 
 IMMISCIBLE_SOLVENTS = [
